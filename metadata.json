@@ -1,0 +1,10 @@
+{
+  "name": "Despensa Stock",
+  "description": "Aplicación PWA para la gestión e identificación de productos mediante lectura de código de barras con cámara y base de datos Firestore.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

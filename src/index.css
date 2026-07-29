@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+@layer utilities {
+  .bento-card {
+    background-color: #ffffff;
+    border: 1px solid #E2E8F0;
+    border-radius: 24px;
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  }
+  
+  .bento-card-interactive {
+    cursor: pointer;
+  }
+  .bento-card-interactive:hover {
+    border-color: #CBD5E1;
+    box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.05);
+  }
+
+  .status-dot {
+    height: 8px;
+    width: 8px;
+    border-radius: 50%;
+    background-color: #10B981;
+    display: inline-block;
+    margin-right: 6px;
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+  }
+
+  .scan-line {
+    height: 2px;
+    background-color: #10B981;
+    box-shadow: 0 0 15px #10B981;
+    animation: scan 2s linear infinite;
+  }
+}
+
+@keyframes scan {
+  0%, 100% { top: 0; }
+  50% { top: 100%; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.3s ease-out forwards;
+}
