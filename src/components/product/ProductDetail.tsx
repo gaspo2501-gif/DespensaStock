@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Product } from '../../types/product';
+import { StockManager } from './StockManager';
 import { 
   Barcode, 
   Package, 
@@ -20,19 +21,29 @@ interface ProductDetailProps {
   onClose: () => void;
   onEdit: (product: Product) => void;
   onDelete: (productId: string) => void;
+  onProductUpdated?: (product: Product) => void;
   onScanAnother?: () => void;
 }
 
 export const ProductDetail: React.FC<ProductDetailProps> = ({
-  product,
+  product: initialProduct,
   onClose,
   onEdit,
   onDelete,
+  onProductUpdated,
   onScanAnother,
 }) => {
+  const [product, setProduct] = useState<Product>(initialProduct);
   const [imgError, setImgError] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleStockUpdated = (updated: Product) => {
+    setProduct(updated);
+    if (onProductUpdated) {
+      onProductUpdated(updated);
+    }
+  };
 
   const sourceMap = {
     local: { label: 'Guardado en Base Propia (Firebase)', color: 'text-emerald-700 bg-emerald-50 border-emerald-200' },
@@ -145,6 +156,13 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Interactive Stock Management Box */}
+          <StockManager
+            product={product}
+            onStockUpdated={handleStockUpdated}
+            onScanNext={onScanAnother}
+          />
 
           {/* Description Section */}
           {product.description && (

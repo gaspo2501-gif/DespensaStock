@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { BarcodeScanner } from '../components/scanner/BarcodeScanner';
 import { ProductCard } from '../components/product/ProductCard';
 import { ProductForm } from '../components/product/ProductForm';
+import { StockManager } from '../components/product/StockManager';
 import { productService } from '../services/firebase/productService';
 import { getProductByBarcodeExternal } from '../services/externalApi/productApiService';
 import { Product, CreateProductInput } from '../types/product';
@@ -44,6 +45,7 @@ export const ScanPage: React.FC<ScanPageProps> = ({
   // Results states
   const [foundProduct, setFoundProduct] = useState<Product | null>(null);
   const [externalProduct, setExternalProduct] = useState<CreateProductInput | null>(null);
+  const [externalInitialStock, setExternalInitialStock] = useState<number>(1);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSavingExternal, setIsSavingExternal] = useState(false);
 
@@ -52,6 +54,7 @@ export const ScanPage: React.FC<ScanPageProps> = ({
     setScannedBarcode('');
     setFoundProduct(null);
     setExternalProduct(null);
+    setExternalInitialStock(1);
     setErrorMessage(null);
   };
 
@@ -114,7 +117,10 @@ export const ScanPage: React.FC<ScanPageProps> = ({
     setIsSavingExternal(true);
 
     try {
-      const saved = await productService.saveProduct(externalProduct);
+      const saved = await productService.saveProduct({
+        ...externalProduct,
+        stockQuantity: externalInitialStock,
+      });
       setFoundProduct(saved);
       onProductSaved(saved);
       setStage('found_firebase');
@@ -203,15 +209,35 @@ export const ScanPage: React.FC<ScanPageProps> = ({
       {/* 3. FOUND IN FIREBASE STAGE */}
       {stage === 'found_firebase' && foundProduct && (
         <div className="space-y-4">
-          <div className="p-4 bg-emerald-600 text-white rounded-2xl flex items-center gap-3 shadow-md">
-            <CheckCircle2 className="w-6 h-6 flex-shrink-0" />
-            <div>
-              <p className="text-xs font-semibold text-emerald-100">¡Producto Encontrado!</p>
-              <p className="text-sm font-bold">Registrado en tu base propia de Firebase</p>
+          <div className="p-4 bg-emerald-600 text-white rounded-2xl flex items-center justify-between shadow-md">
+            <div className="flex items-center gap-3">
+              <CheckCircle2 className="w-6 h-6 flex-shrink-0" />
+              <div>
+                <p className="text-xs font-semibold text-emerald-100">¡Producto Encontrado!</p>
+                <p className="text-sm font-bold">Registrado en tu base propia</p>
+              </div>
             </div>
+
+            <button
+              onClick={resetScan}
+              className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs rounded-xl flex items-center gap-1 transition-colors"
+            >
+              <ScanLine className="w-3.5 h-3.5" />
+              Escanear
+            </button>
           </div>
 
-          <ProductCard product={foundProduct} showActions={true} />
+          <ProductCard product={foundProduct} showActions={false} />
+
+          {/* Interactive Stock Manager */}
+          <StockManager
+            product={foundProduct}
+            onStockUpdated={(updated) => {
+              setFoundProduct(updated);
+              onProductSaved(updated);
+            }}
+            onScanNext={resetScan}
+          />
 
           <button
             onClick={resetScan}
@@ -272,6 +298,21 @@ export const ScanPage: React.FC<ScanPageProps> = ({
                 <p className="text-xs font-mono font-bold text-slate-700 mt-1">EAN: {externalProduct.barcode}</p>
               </div>
             </div>
+          </div>
+
+          {/* Initial Stock Input for External Product */}
+          <div className="p-4 bg-emerald-50/80 border border-emerald-200 rounded-2xl">
+            <label className="block text-xs font-bold text-emerald-900 uppercase tracking-wider mb-1 flex items-center justify-between">
+              <span>Cantidad Inicial de Stock Físico</span>
+              <span className="text-[10px] text-emerald-700 font-normal">Inventario</span>
+            </label>
+            <input
+              type="number"
+              min="0"
+              value={externalInitialStock}
+              onChange={(e) => setExternalInitialStock(parseInt(e.target.value, 10) || 0)}
+              className="w-full px-4 py-2.5 bg-white border border-emerald-300 rounded-xl font-mono font-bold text-slate-900 text-base focus:ring-2 focus:ring-emerald-500 outline-none"
+            />
           </div>
 
           {errorMessage && (

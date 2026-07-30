@@ -27,6 +27,7 @@ export const ProductForm: React.FC<ProductFormProps> = ({
   const [presentation, setPresentation] = useState(initialData?.presentation || '');
   const [description, setDescription] = useState(initialData?.description || '');
   const [imageUrl, setImageUrl] = useState(initialData?.imageUrl || '');
+  const [stockQuantity, setStockQuantity] = useState<number>(initialData?.stockQuantity ?? 1);
   const [customCategory, setCustomCategory] = useState('');
   const [isCustomCategory, setIsCustomCategory] = useState(false);
 
@@ -67,6 +68,7 @@ export const ProductForm: React.FC<ProductFormProps> = ({
         description: description.trim(),
         imageUrl: imageUrl.trim(),
         source: isEditing ? (initialData?.source || 'manual') : source,
+        stockQuantity: isNaN(stockQuantity) || stockQuantity < 0 ? 0 : stockQuantity,
       });
 
       setSuccess(true);
@@ -178,6 +180,27 @@ export const ProductForm: React.FC<ProductFormProps> = ({
               className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 text-sm placeholder:text-slate-400 focus:ring-2 focus:ring-emerald-500 outline-none"
             />
           </div>
+        </div>
+
+        {/* Initial Stock Input Field */}
+        <div className="p-4 bg-emerald-50/80 border border-emerald-200 rounded-2xl">
+          <label className="block text-xs font-bold text-emerald-900 uppercase tracking-wider mb-1 flex items-center justify-between">
+            <span>{isEditing ? 'Stock Actual (Unidades)' : 'Cantidad Inicial de Stock'}</span>
+            <span className="text-[10px] text-emerald-700 font-normal">Conteo Físico</span>
+          </label>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min="0"
+              value={stockQuantity}
+              onChange={(e) => setStockQuantity(parseInt(e.target.value, 10) || 0)}
+              className="w-full px-4 py-2.5 bg-white border border-emerald-300 rounded-xl text-slate-900 font-mono font-bold text-base focus:ring-2 focus:ring-emerald-500 outline-none"
+              required
+            />
+          </div>
+          <p className="text-[11px] text-emerald-800 mt-1">
+            Indica cuántas unidades existen actualmente en el inventario.
+          </p>
         </div>
 
         {/* Category Selector */}

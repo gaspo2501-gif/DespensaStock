@@ -13,7 +13,7 @@ import {
   Timestamp
 } from 'firebase/firestore';
 import { db } from './config';
-import { Product, CreateProductInput } from '../../types/product';
+import { Product, CreateProductInput, StockOperation } from '../../types/product';
 
 const PRODUCTS_COLLECTION = 'products';
 const LOCAL_STORAGE_KEY = 'despensa_stock_local_products';
@@ -66,7 +66,7 @@ export const productService = {
           createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : (data.createdAt || new Date().toISOString()),
           updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : (data.updatedAt || new Date().toISOString()),
           source: data.source || 'local',
-          stockQuantity: data.stockQuantity || 0,
+          stockQuantity: data.stockQuantity ?? data.stock ?? 0,
         };
       }
     } catch (error) {
@@ -102,7 +102,7 @@ export const productService = {
           createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : (data.createdAt || new Date().toISOString()),
           updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : (data.updatedAt || new Date().toISOString()),
           source: data.source || 'local',
-          stockQuantity: data.stockQuantity || 0,
+          stockQuantity: data.stockQuantity ?? data.stock ?? 0,
         });
       });
 
@@ -139,6 +139,7 @@ export const productService = {
     const nowIso = new Date().toISOString();
     // Generate document ID from barcode or auto timestamp
     const docId = `prod_${cleanedBarcode}_${Date.now()}`;
+    const initialStock = typeof input.stockQuantity === 'number' && !isNaN(input.stockQuantity) && input.stockQuantity >= 0 ? input.stockQuantity : 0;
 
     const newProduct: Product = {
       id: docId,
@@ -152,6 +153,7 @@ export const productService = {
       createdAt: nowIso,
       updatedAt: nowIso,
       source: input.source || 'manual',
+      stockQuantity: initialStock,
     };
 
     try {
@@ -167,6 +169,8 @@ export const productService = {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         source: newProduct.source,
+        stockQuantity: initialStock,
+        stock: initialStock,
       });
     } catch (error) {
       console.warn('Error saving to Firestore, saved to local cache:', error);
@@ -178,6 +182,94 @@ export const productService = {
     saveLocalProducts(currentLocal);
 
     return newProduct;
+  },
+
+  /**
+   * Update product stock safely (add, subtract, set)
+   */
+  async updateStock(productId: string, operation: StockOperation, quantity: number): Promise<Product> {
+    if (isNaN(quantity) || quantity < 0) {
+      throw new Error('La cantidad ingresada debe ser un número válido mayor o igual a cero');
+    }
+
+    let currentProduct: Product | null = null;
+
+    try {
+      const docRef = doc(db, PRODUCTS_COLLECTION, productId);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        currentProduct = {
+          id: docSnap.id,
+          barcode: data.barcode,
+          name: data.name || 'Sin Nombre',
+          brand: data.brand || '',
+          category: data.category || 'Otros',
+          presentation: data.presentation || '',
+          description: data.description || '',
+          imageUrl: data.imageUrl || '',
+          createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : (data.createdAt || new Date().toISOString()),
+          updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : (data.updatedAt || new Date().toISOString()),
+          source: data.source || 'local',
+          stockQuantity: data.stockQuantity ?? data.stock ?? 0,
+        };
+      }
+    } catch (err) {
+      console.warn('Error fetching product for stock update from Firestore:', err);
+    }
+
+    if (!currentProduct) {
+      const local = getLocalProducts();
+      currentProduct = local.find(p => p.id === productId) || null;
+    }
+
+    if (!currentProduct) {
+      throw new Error('Producto no encontrado para actualizar el stock');
+    }
+
+    const currentStock = currentProduct.stockQuantity || 0;
+    let newStock = currentStock;
+
+    if (operation === 'add') {
+      newStock = currentStock + quantity;
+    } else if (operation === 'subtract') {
+      if (currentStock - quantity < 0) {
+        throw new Error(`No es posible restar ${quantity} unidades. El stock actual es ${currentStock} y no puede resultar negativo.`);
+      }
+      newStock = currentStock - quantity;
+    } else if (operation === 'set') {
+      newStock = quantity;
+    }
+
+    const nowIso = new Date().toISOString();
+
+    try {
+      const docRef = doc(db, PRODUCTS_COLLECTION, productId);
+      await updateDoc(docRef, {
+        stockQuantity: newStock,
+        stock: newStock,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      console.warn('Error updating stock in Firestore, updated local cache:', error);
+    }
+
+    const updatedProduct: Product = {
+      ...currentProduct,
+      stockQuantity: newStock,
+      updatedAt: nowIso,
+    };
+
+    const local = getLocalProducts();
+    const idx = local.findIndex(p => p.id === productId);
+    if (idx !== -1) {
+      local[idx] = updatedProduct;
+    } else {
+      local.push(updatedProduct);
+    }
+    saveLocalProducts(local);
+
+    return updatedProduct;
   },
 
   /**

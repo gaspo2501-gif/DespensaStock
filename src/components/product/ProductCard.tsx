@@ -37,15 +37,25 @@ export const ProductCard: React.FC<ProductCardProps> = ({
       }`}
     >
       <div className="p-4 space-y-3">
-        {/* Top Header: Category & Source */}
-        <div className="flex items-center justify-between gap-2">
+        {/* Top Header: Category, Source & Stock */}
+        <div className="flex items-center justify-between gap-1.5 flex-wrap">
           <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${categoryColor}`}>
             {product.category || 'Sin Categoría'}
           </span>
 
-          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${currentSource.bg}`}>
-            {currentSource.label}
-          </span>
+          <div className="flex items-center gap-1.5">
+            <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border ${
+              (product.stockQuantity ?? 0) > 0 
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
+                : 'bg-rose-50 text-rose-700 border-rose-200'
+            }`}>
+              Stock: {product.stockQuantity ?? 0}
+            </span>
+
+            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${currentSource.bg}`}>
+              {currentSource.label}
+            </span>
+          </div>
         </div>
 
         {/* Image & Title Body */}

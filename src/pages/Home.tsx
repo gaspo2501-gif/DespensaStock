@@ -109,10 +109,12 @@ export const Home: React.FC<HomeProps> = ({
             <div className="text-3xl font-black text-slate-900 tracking-tight">
               {products.length}{' '}
               <span className="text-xs font-semibold text-slate-400 tracking-normal uppercase">
-                SKUs Registrados
+                Productos
               </span>
             </div>
-            <p className="text-[11px] text-slate-500 mt-1">Conexión en tiempo real con Firestore</p>
+            <p className="text-[11px] text-emerald-700 font-bold mt-1">
+              Stock total: {products.reduce((acc, p) => acc + (p.stockQuantity || 0), 0)} unidades
+            </p>
           </div>
         </div>
 
@@ -299,17 +301,17 @@ export const Home: React.FC<HomeProps> = ({
           <div>
             <div className="flex items-center gap-2 font-bold text-slate-900 text-sm mb-1">
               <Layers className="w-4 h-4 text-emerald-600" />
-              Base de Datos Modulable (v1.0)
+              Gestión de Stock Activa
             </div>
             <p className="text-xs text-slate-500 leading-relaxed mt-2">
-              Esta versión establece el motor de productos y códigos de barra. La estructura está lista para integrar módulos de Stock (V2), Registros de Ventas (V3) y Proveedores (V4).
+              Inventario físico en tiempo real habilitado. Permite sumar, restar y establecer stock durante el escaneo o catálogo, previniendo valores negativos.
             </p>
           </div>
 
           <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-            <span className="text-slate-400 font-medium">Estado del Esquema</span>
+            <span className="text-slate-400 font-medium">Módulo de Stock</span>
             <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full font-bold text-[10px]">
-              OPTIMIZADO
+              ACTIVO
             </span>
           </div>
         </div>

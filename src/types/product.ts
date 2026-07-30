@@ -1,4 +1,5 @@
 export type ProductSource = 'local' | 'external_api' | 'manual';
+export type StockOperation = 'add' | 'subtract' | 'set';
 
 export interface Product {
   id: string;
@@ -13,15 +14,16 @@ export interface Product {
   updatedAt: string; // ISO string
   source: ProductSource;
   
-  // Future modular extension hooks (V2+ readiness)
-  stockQuantity?: number;
+  stockQuantity: number;
   minStockAlert?: number;
   costPrice?: number;
   salePrice?: number;
   supplierId?: string;
 }
 
-export type CreateProductInput = Omit<Product, 'id' | 'createdAt' | 'updatedAt'>;
+export type CreateProductInput = Omit<Product, 'id' | 'createdAt' | 'updatedAt' | 'stockQuantity'> & {
+  stockQuantity?: number;
+};
 
 export interface ExternalProductResult {
   found: boolean;

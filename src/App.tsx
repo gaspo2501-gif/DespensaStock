@@ -58,6 +58,7 @@ export default function App() {
       presentation: inputData.presentation,
       description: inputData.description,
       imageUrl: inputData.imageUrl,
+      stockQuantity: inputData.stockQuantity,
     });
 
     handleProductSaved(updated);
@@ -164,6 +165,7 @@ export default function App() {
             setEditingProduct(p);
           }}
           onDelete={handleDeleteProduct}
+          onProductUpdated={handleProductSaved}
           onScanAnother={() => {
             setSelectedProduct(null);
             setCurrentTab('scan');
