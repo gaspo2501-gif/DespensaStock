@@ -8,6 +8,7 @@ import { ScanPage } from './pages/ScanPage';
 import { SearchPage } from './pages/SearchPage';
 import { ProductListPage } from './pages/ProductListPage';
 import { SalesPage } from './pages/SalesPage';
+import { CustomersPage } from './pages/CustomersPage';
 import { ProductDetail } from './components/product/ProductDetail';
 import { ProductForm } from './components/product/ProductForm';
 import { Loader2, AlertCircle, RefreshCw } from 'lucide-react';
@@ -168,6 +169,10 @@ export default function App() {
                 onDeleteProduct={handleDeleteProduct}
                 onAddNewProduct={() => setShowManualForm(true)}
               />
+            )}
+
+            {currentTab === 'customers' && (
+              <CustomersPage />
             )}
           </>
         )}

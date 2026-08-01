@@ -1,9 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Product } from '../types/product';
-import { CartItem, SaleRecord } from '../types/sale';
+import { CartItem, SaleRecord, PaymentMethod } from '../types/sale';
+import { Customer, CreateCustomerInput } from '../types/customer';
 import { productService } from '../services/firebase/productService';
 import { salesService } from '../services/firebase/salesService';
+import { customerService } from '../services/firebase/customerService';
+import { accountService } from '../services/firebase/accountService';
 import { BarcodeScanner } from '../components/scanner/BarcodeScanner';
+import { CustomerFormModal } from '../components/customer/CustomerFormModal';
 import { playScanSound } from '../utils/audio';
 import { 
   ShoppingCart, 
@@ -19,7 +23,12 @@ import {
   Package, 
   ArrowLeft,
   X,
-  Sparkles
+  CreditCard,
+  Users,
+  UserCheck,
+  UserPlus,
+  QrCode,
+  Banknote
 } from 'lucide-react';
 
 interface SalesPageProps {
@@ -40,6 +49,15 @@ export const SalesPage: React.FC<SalesPageProps> = ({
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   
+  // Payment method & Customer selection state
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [customerSearchTerm, setCustomerSearchTerm] = useState('');
+  const [customersList, setCustomersList] = useState<Customer[]>([]);
+  const [customerBalances, setCustomerBalances] = useState<Record<string, number>>({});
+  const [showCreateCustomerModal, setShowCreateCustomerModal] = useState(false);
+  const [loadingCustomers, setLoadingCustomers] = useState(false);
+
   // Status & Feedback banners
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'warning'; message: string } | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -47,6 +65,41 @@ export const SalesPage: React.FC<SalesPageProps> = ({
 
   // Helper to clear feedback banner
   const clearFeedback = () => setFeedback(null);
+
+  // Load customers when Fiado is chosen
+  const loadCustomersData = useCallback(async () => {
+    setLoadingCustomers(true);
+    try {
+      const [custList, balMap] = await Promise.all([
+        customerService.getAllCustomers(),
+        accountService.getAllBalances(),
+      ]);
+      setCustomersList(custList);
+      setCustomerBalances(balMap);
+    } catch (err) {
+      console.warn('Error al cargar clientes para venta fiada:', err);
+    } finally {
+      setLoadingCustomers(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (paymentMethod === 'credit') {
+      loadCustomersData();
+    }
+  }, [paymentMethod, loadCustomersData]);
+
+  // Handle inline creation of customer from sale
+  const handleCreateCustomerFromSale = async (data: CreateCustomerInput) => {
+    const created = await customerService.createCustomer(data);
+    setSelectedCustomer(created);
+    setShowCreateCustomerModal(false);
+    await loadCustomersData();
+    setFeedback({
+      type: 'success',
+      message: `Cliente '${created.name}' creado y seleccionado para la venta.`,
+    });
+  };
 
   // Add product to cart logic
   const handleAddProductToCart = (product: Product) => {
@@ -194,6 +247,8 @@ export const SalesPage: React.FC<SalesPageProps> = ({
   // Clear Cart
   const handleClearCart = () => {
     setCart([]);
+    setSelectedCustomer(null);
+    setPaymentMethod('cash');
     setFeedback(null);
   };
 
@@ -205,14 +260,32 @@ export const SalesPage: React.FC<SalesPageProps> = ({
   const handleConfirmSale = async () => {
     if (cart.length === 0) return;
     clearFeedback();
+
+    // Fiado validation
+    if (paymentMethod === 'credit' && !selectedCustomer) {
+      playScanSound('error');
+      setFeedback({
+        type: 'warning',
+        message: 'Seleccioná o creá un cliente para continuar con la venta fiada.',
+      });
+      return;
+    }
+
     setIsProcessing(true);
 
     try {
-      const result = await salesService.processSale(cart);
+      const result = await salesService.processSale(
+        cart,
+        paymentMethod,
+        selectedCustomer?.id,
+        selectedCustomer?.name
+      );
       onProductsUpdated(result.updatedProducts);
       setCompletedSale(result.sale);
       playScanSound('success');
       setCart([]);
+      setSelectedCustomer(null);
+      setPaymentMethod('cash');
     } catch (err: unknown) {
       playScanSound('error');
       setFeedback({
@@ -234,10 +307,19 @@ export const SalesPage: React.FC<SalesPageProps> = ({
       )
     : products.slice(0, 10);
 
+  // Filtered customer search for Fiado selection
+  const customerSearchResults = customerSearchTerm.trim()
+    ? customersList.filter(
+        (c) =>
+          c.name.toLowerCase().includes(customerSearchTerm.toLowerCase()) ||
+          (c.phone && c.phone.toLowerCase().includes(customerSearchTerm.toLowerCase()))
+      )
+    : customersList;
+
   return (
     <div className="space-y-5 animate-fadeIn max-w-3xl mx-auto">
       {/* Top Header */}
-      <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm flex items-center justify-between gap-3">
+      <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-2xs flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-md shadow-emerald-600/20">
             <ShoppingCart className="w-6 h-6" />
@@ -281,6 +363,17 @@ export const SalesPage: React.FC<SalesPageProps> = ({
               <span className="font-bold text-slate-700">{completedSale.id}</span>
             </div>
 
+            <div className="flex justify-between text-xs text-slate-500 border-b pb-2 font-sans">
+              <span>Forma de Pago:</span>
+              <span className="font-bold text-slate-800 uppercase">
+                {completedSale.paymentMethod === 'credit'
+                  ? `Fiado (${completedSale.customerName || 'Cliente'})`
+                  : completedSale.paymentMethod === 'mercado_pago'
+                  ? 'Mercado Pago'
+                  : 'Efectivo'}
+              </span>
+            </div>
+
             <div className="space-y-1 text-xs">
               {completedSale.items.map((item, i) => (
                 <div key={i} className="flex justify-between text-slate-800">
@@ -305,7 +398,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
 
           <button
             onClick={() => setCompletedSale(null)}
-            className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm rounded-2xl shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+            className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm rounded-2xl shadow-lg transition-all active:scale-98 flex items-center justify-center gap-2"
           >
             <Plus className="w-5 h-5 stroke-[2.5]" />
             Iniciar Nueva Venta
@@ -317,7 +410,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
           <div className="grid grid-cols-2 gap-3">
             <button
               onClick={() => setIsScannerOpen(true)}
-              className="p-4 bg-gradient-to-br from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl font-bold text-xs shadow-md active:scale-[0.98] transition-all flex flex-col items-center justify-center gap-2 text-center"
+              className="p-4 bg-gradient-to-br from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl font-bold text-xs shadow-md active:scale-98 transition-all flex flex-col items-center justify-center gap-2 text-center"
             >
               <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
                 <ScanLine className="w-6 h-6" />
@@ -327,7 +420,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
 
             <button
               onClick={() => setIsSearchOpen(true)}
-              className="p-4 bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 rounded-2xl font-bold text-xs shadow-xs active:scale-[0.98] transition-all flex flex-col items-center justify-center gap-2 text-center"
+              className="p-4 bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 rounded-2xl font-bold text-xs shadow-2xs active:scale-98 transition-all flex flex-col items-center justify-center gap-2 text-center"
             >
               <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700">
                 <Search className="w-5 h-5" />
@@ -349,11 +442,11 @@ export const SalesPage: React.FC<SalesPageProps> = ({
             >
               <div className="flex items-center gap-2.5">
                 {feedback.type === 'error' ? (
-                  <AlertCircle className="w-5 h-5 text-rose-600 flex-shrink-0" />
+                  <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
                 ) : feedback.type === 'warning' ? (
-                  <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+                  <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
                 ) : (
-                  <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
                 )}
                 <span>{feedback.message}</span>
               </div>
@@ -365,7 +458,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
 
           {/* Cart Contents */}
           {cart.length === 0 ? (
-            <div className="p-8 bg-white border border-slate-200 rounded-3xl text-center space-y-4 shadow-xs">
+            <div className="p-8 bg-white border border-slate-200 rounded-3xl text-center space-y-4 shadow-2xs">
               <div className="w-16 h-16 bg-slate-100 text-slate-400 rounded-full flex items-center justify-center mx-auto">
                 <ShoppingCart className="w-8 h-8" />
               </div>
@@ -399,7 +492,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
                 {cart.map((item) => (
                   <div
                     key={item.product.id}
-                    className="p-4 bg-white border border-slate-200 rounded-2xl shadow-xs space-y-3 relative"
+                    className="p-4 bg-white border border-slate-200 rounded-2xl shadow-2xs space-y-3 relative"
                   >
                     {/* Top Row: Title, Stock badge & Delete */}
                     <div className="flex items-start justify-between gap-2">
@@ -491,6 +584,164 @@ export const SalesPage: React.FC<SalesPageProps> = ({
                 ))}
               </div>
 
+              {/* FORMA DE PAGO SECTION */}
+              <div className="p-4 bg-white border border-slate-200 rounded-3xl space-y-3 shadow-2xs">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">Forma de Pago</h3>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPaymentMethod('cash');
+                      setSelectedCustomer(null);
+                    }}
+                    className={`py-3 px-2 rounded-2xl font-bold text-xs transition-all flex flex-col items-center justify-center gap-1 border ${
+                      paymentMethod === 'cash'
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <Banknote className="w-4 h-4" />
+                    <span>Efectivo</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPaymentMethod('mercado_pago');
+                      setSelectedCustomer(null);
+                    }}
+                    className={`py-3 px-2 rounded-2xl font-bold text-xs transition-all flex flex-col items-center justify-center gap-1 border ${
+                      paymentMethod === 'mercado_pago'
+                        ? 'bg-sky-600 text-white border-sky-600 shadow-sm'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <QrCode className="w-4 h-4" />
+                    <span>Mercado Pago</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethod('credit')}
+                    className={`py-3 px-2 rounded-2xl font-bold text-xs transition-all flex flex-col items-center justify-center gap-1 border ${
+                      paymentMethod === 'credit'
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <Users className="w-4 h-4" />
+                    <span>Fiado (Cuenta)</span>
+                  </button>
+                </div>
+
+                {/* FIADO CUSTOMER SELECTOR */}
+                {paymentMethod === 'credit' && (
+                  <div className="pt-3 border-t border-slate-100 space-y-3 animate-fadeIn">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-indigo-900 uppercase tracking-wider flex items-center gap-1.5">
+                        <Users className="w-4 h-4 text-indigo-600" />
+                        <span>Seleccionar Cliente para Venta Fiada</span>
+                      </label>
+
+                      <button
+                        type="button"
+                        onClick={() => setShowCreateCustomerModal(true)}
+                        className="px-2.5 py-1 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-colors flex items-center gap-1"
+                      >
+                        <UserPlus className="w-3.5 h-3.5" />
+                        <span>+ Crear nuevo</span>
+                      </button>
+                    </div>
+
+                    {selectedCustomer ? (
+                      /* Selected Customer Badge Card */
+                      <div className="p-3.5 bg-indigo-50 border border-indigo-200 rounded-2xl flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold">
+                            <UserCheck className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-indigo-950">{selectedCustomer.name}</p>
+                            <p className="text-[11px] text-indigo-700 font-mono">
+                              Saldo actual:{' '}
+                              <span className="font-bold">
+                                ${(customerBalances[selectedCustomer.id] || 0).toLocaleString('es-AR')}
+                              </span>
+                            </p>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setSelectedCustomer(null)}
+                          className="px-2.5 py-1 text-[11px] font-bold text-slate-600 hover:text-slate-900 bg-white border border-slate-300 rounded-xl"
+                        >
+                          Cambiar
+                        </button>
+                      </div>
+                    ) : (
+                      /* Search & Select Customer Dropdown list */
+                      <div className="space-y-2">
+                        <div className="relative">
+                          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                          <input
+                            type="text"
+                            placeholder="Buscar cliente por nombre o teléfono..."
+                            value={customerSearchTerm}
+                            onChange={(e) => setCustomerSearchTerm(e.target.value)}
+                            className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                          />
+                        </div>
+
+                        {loadingCustomers ? (
+                          <div className="p-3 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+                            <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
+                            <span>Cargando lista de clientes...</span>
+                          </div>
+                        ) : customerSearchResults.length === 0 ? (
+                          <div className="p-4 bg-slate-50 rounded-2xl text-center space-y-2">
+                            <p className="text-xs text-slate-500">No se encontraron clientes con ese nombre.</p>
+                            <button
+                              type="button"
+                              onClick={() => setShowCreateCustomerModal(true)}
+                              className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-xl shadow-xs"
+                            >
+                              + Crear cliente '{customerSearchTerm}'
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
+                            {customerSearchResults.map((cust) => {
+                              const bal = customerBalances[cust.id] || 0;
+                              return (
+                                <button
+                                  key={cust.id}
+                                  type="button"
+                                  onClick={() => setSelectedCustomer(cust)}
+                                  className="w-full p-2.5 bg-slate-50 hover:bg-indigo-50/80 border border-slate-200 hover:border-indigo-200 rounded-xl text-left flex items-center justify-between transition-colors"
+                                >
+                                  <div>
+                                    <p className="text-xs font-bold text-slate-900">{cust.name}</p>
+                                    {cust.phone && <p className="text-[10px] text-slate-500">{cust.phone}</p>}
+                                  </div>
+                                  <span
+                                    className={`text-[10px] font-extrabold font-mono px-2 py-0.5 rounded-md ${
+                                      bal > 0 ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700'
+                                    }`}
+                                  >
+                                    {bal > 0 ? `Deuda: $${bal.toLocaleString('es-AR')}` : 'Sin deuda'}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* Total Summary Footer Box */}
               <div className="p-5 bg-slate-900 text-white rounded-3xl shadow-lg space-y-4">
                 <div className="flex justify-between items-center border-b border-slate-800 pb-3">
@@ -508,7 +759,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
                 <button
                   onClick={handleConfirmSale}
                   disabled={isProcessing || cart.length === 0}
-                  className="w-full py-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-black text-sm rounded-2xl shadow-md active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+                  className="w-full py-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-black text-sm rounded-2xl shadow-md active:scale-98 transition-all flex items-center justify-center gap-2"
                 >
                   {isProcessing ? (
                     <>
@@ -518,7 +769,11 @@ export const SalesPage: React.FC<SalesPageProps> = ({
                   ) : (
                     <>
                       <CheckCircle2 className="w-5 h-5 stroke-[2.5]" />
-                      <span>CONFIRMAR VENTA (${totalAmount.toLocaleString('es-AR')})</span>
+                      <span>
+                        {paymentMethod === 'credit'
+                          ? `CONFIRMAR VENTA FIADA (${selectedCustomer?.name || 'Seleccionar cliente'})`
+                          : `CONFIRMAR VENTA ($${totalAmount.toLocaleString('es-AR')})`}
+                      </span>
                     </>
                   )}
                 </button>
@@ -626,7 +881,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
                         className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 ${
                           stock <= 0
                             ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                            : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs'
+                            : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-2xs'
                         }`}
                       >
                         <Plus className="w-3.5 h-3.5" />
@@ -639,6 +894,16 @@ export const SalesPage: React.FC<SalesPageProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* INLINE CREATE CUSTOMER MODAL */}
+      {showCreateCustomerModal && (
+        <CustomerFormModal
+          isEditing={false}
+          title="Crear Cliente para Venta Fiada"
+          onSubmit={handleCreateCustomerFromSale}
+          onCancel={() => setShowCreateCustomerModal(false)}
+        />
       )}
     </div>
   );

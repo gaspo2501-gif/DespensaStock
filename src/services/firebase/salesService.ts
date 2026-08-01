@@ -8,12 +8,14 @@ import {
   orderBy 
 } from 'firebase/firestore';
 import { db } from './config';
-import { CartItem, SaleRecord, SaleItemRecord } from '../../types/sale';
+import { CartItem, SaleRecord, SaleItemRecord, PaymentMethod } from '../../types/sale';
 import { Product } from '../../types/product';
 import { productService } from './productService';
+import { accountService } from './accountService';
 
 const SALES_COLLECTION = 'sales';
 const PRODUCTS_COLLECTION = 'products';
+const MOVEMENTS_COLLECTION = 'account_movements';
 const LOCAL_SALES_KEY = 'despensa_stock_local_sales';
 
 function getLocalSales(): SaleRecord[] {
@@ -36,11 +38,21 @@ function saveLocalSales(sales: SaleRecord[]) {
 export const salesService = {
   /**
    * Process and confirm a sale transaction atomically in Firestore.
-   * Validates stock for all items, creates the sale record, and deducts product stock safely.
+   * Validates stock for all items, creates the sale record, deducts product stock safely,
+   * and registers customer debt if payment method is 'credit' (fiado).
    */
-  async processSale(cartItems: CartItem[]): Promise<{ sale: SaleRecord; updatedProducts: Product[] }> {
+  async processSale(
+    cartItems: CartItem[], 
+    paymentMethod: PaymentMethod = 'cash', 
+    customerId?: string, 
+    customerName?: string
+  ): Promise<{ sale: SaleRecord; updatedProducts: Product[] }> {
     if (!cartItems || cartItems.length === 0) {
       throw new Error('El carrito de ventas está vacío.');
+    }
+
+    if (paymentMethod === 'credit' && !customerId) {
+      throw new Error('Seleccioná o creá un cliente para continuar.');
     }
 
     // 1. Pre-validation on client side
@@ -78,6 +90,9 @@ export const salesService = {
       items: saleItemsRecords,
       totalAmount,
       totalItemsCount,
+      paymentMethod,
+      customerId: customerId || undefined,
+      customerName: customerName || undefined,
     };
 
     let transactionSucceeded = false;
@@ -128,21 +143,41 @@ export const salesService = {
 
         // Step C: Write sale record document
         const saleRef = doc(db, SALES_COLLECTION, saleId);
-        transaction.set(saleRef, {
+        const salePayload: Record<string, any> = {
           id: saleId,
           createdAt: serverTimestamp(),
           createdAtIso: nowIso,
           items: saleItemsRecords,
           totalAmount,
           totalItemsCount,
-        });
+          paymentMethod,
+        };
+        if (customerId) salePayload.customerId = customerId;
+        if (customerName) salePayload.customerName = customerName;
+
+        transaction.set(saleRef, salePayload);
+
+        // Step D: Write DEBT movement in account_movements if paymentMethod === 'credit'
+        if (paymentMethod === 'credit' && customerId) {
+          const movId = `mov_debt_${Date.now()}`;
+          const movRef = doc(db, MOVEMENTS_COLLECTION, movId);
+          transaction.set(movRef, {
+            id: movId,
+            customerId,
+            type: 'DEBT',
+            amount: totalAmount,
+            description: 'Venta fiada',
+            saleId,
+            createdAtIso: nowIso,
+            createdAt: serverTimestamp(),
+          });
+        }
       });
 
       transactionSucceeded = true;
     } catch (err: unknown) {
       console.warn('Transacción de Firestore falló o se ejecutó sin conexión:', err);
-      // Rethrow if it was a explicit stock validation error
-      if (err instanceof Error && err.message.includes('Stock insuficiente')) {
+      if (err instanceof Error && (err.message.includes('Stock insuficiente') || err.message.includes('cliente'))) {
         throw err;
       }
     }
@@ -153,6 +188,10 @@ export const salesService = {
       for (const item of cartItems) {
         const updated = await productService.updateStock(item.product.id, 'subtract', item.quantity);
         updatedProducts.push(updated);
+      }
+
+      if (paymentMethod === 'credit' && customerId) {
+        await accountService.registerDebt(customerId, totalAmount, 'Venta fiada', saleId);
       }
     }
 
@@ -184,6 +223,9 @@ export const salesService = {
           items: data.items || [],
           totalAmount: data.totalAmount || 0,
           totalItemsCount: data.totalItemsCount || 0,
+          paymentMethod: data.paymentMethod || 'cash',
+          customerId: data.customerId || undefined,
+          customerName: data.customerName || undefined,
         });
       });
 

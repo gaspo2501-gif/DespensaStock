@@ -18,10 +18,15 @@ export interface SaleItemRecord {
   subtotal: number;
 }
 
+export type PaymentMethod = 'cash' | 'mercado_pago' | 'credit';
+
 export interface SaleRecord {
   id: string;
   createdAt: string; // ISO timestamp
   items: SaleItemRecord[];
   totalAmount: number;
   totalItemsCount: number;
+  paymentMethod?: PaymentMethod;
+  customerId?: string;
+  customerName?: string;
 }

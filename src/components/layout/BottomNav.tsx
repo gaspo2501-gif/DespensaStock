@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavigationTab } from '../../types/product';
-import { Home, ScanLine, Package, Search, ShoppingCart } from 'lucide-react';
+import { Home, ScanLine, Package, Users, ShoppingCart } from 'lucide-react';
 
 interface BottomNavProps {
   currentTab: NavigationTab;
@@ -14,7 +14,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentTab, onSelectTab })
         {/* Home Tab */}
         <button
           onClick={() => onSelectTab('home')}
-          className={`flex flex-col items-center gap-1 transition-colors py-1 px-2 ${
+          className={`flex flex-col items-center gap-1 transition-colors py-1 px-1.5 ${
             currentTab === 'home' ? 'text-emerald-700 font-bold' : 'text-slate-500 hover:text-slate-800'
           }`}
         >
@@ -25,7 +25,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentTab, onSelectTab })
         {/* Sales / Cart Tab */}
         <button
           onClick={() => onSelectTab('sales')}
-          className={`flex flex-col items-center gap-1 transition-colors py-1 px-2 ${
+          className={`flex flex-col items-center gap-1 transition-colors py-1 px-1.5 ${
             currentTab === 'sales' ? 'text-emerald-700 font-bold' : 'text-slate-500 hover:text-slate-800'
           }`}
         >
@@ -46,21 +46,21 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentTab, onSelectTab })
           </button>
         </div>
 
-        {/* Search Tab */}
+        {/* Customers Tab */}
         <button
-          onClick={() => onSelectTab('search')}
-          className={`flex flex-col items-center gap-1 transition-colors py-1 px-2 ${
-            currentTab === 'search' ? 'text-emerald-700 font-bold' : 'text-slate-500 hover:text-slate-800'
+          onClick={() => onSelectTab('customers')}
+          className={`flex flex-col items-center gap-1 transition-colors py-1 px-1.5 ${
+            currentTab === 'customers' ? 'text-emerald-700 font-bold' : 'text-slate-500 hover:text-slate-800'
           }`}
         >
-          <Search className={`w-5 h-5 ${currentTab === 'search' ? 'stroke-[2.5]' : ''}`} />
-          <span className="text-[10px]">Buscar</span>
+          <Users className={`w-5 h-5 ${currentTab === 'customers' ? 'stroke-[2.5]' : ''}`} />
+          <span className="text-[10px]">Clientes</span>
         </button>
 
         {/* Products List Tab */}
         <button
           onClick={() => onSelectTab('list')}
-          className={`flex flex-col items-center gap-1 transition-colors py-1 px-2 ${
+          className={`flex flex-col items-center gap-1 transition-colors py-1 px-1.5 ${
             currentTab === 'list' ? 'text-emerald-700 font-bold' : 'text-slate-500 hover:text-slate-800'
           }`}
         >
