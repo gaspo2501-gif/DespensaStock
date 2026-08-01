@@ -297,6 +297,11 @@ export const productService = {
           if (typeof val === 'number' && !isNaN(val) && val >= 0) {
             firestoreUpdates.salePrice = val;
           }
+        } else if (key === 'stockQuantity') {
+          if (typeof val === 'number' && !isNaN(val) && val >= 0) {
+            firestoreUpdates.stockQuantity = val;
+            firestoreUpdates.stock = val;
+          }
         } else {
           firestoreUpdates[key] = val;
         }
@@ -305,31 +310,60 @@ export const productService = {
 
     try {
       const docRef = doc(db, PRODUCTS_COLLECTION, id);
-      await updateDoc(docRef, firestoreUpdates);
+      await setDoc(docRef, firestoreUpdates, { merge: true });
     } catch (error) {
       console.warn('Error updating Firestore doc:', error);
     }
 
     const local = getLocalProducts();
     const index = local.findIndex(p => p.id === id);
-    if (index !== -1) {
-      const cleanLocalUpdates: Partial<Product> = {};
-      Object.entries(updates).forEach(([k, v]) => {
-        if (v !== undefined) {
-          (cleanLocalUpdates as any)[k] = v;
-        }
-      });
+    let baseProduct: Product;
 
-      local[index] = { ...local[index], ...cleanLocalUpdates, updatedAt: nowIso };
-      saveLocalProducts(local);
-      return local[index];
+    if (index !== -1) {
+      baseProduct = local[index];
+    } else {
+      baseProduct = {
+        id,
+        barcode: updates.barcode || '',
+        name: updates.name || 'Producto',
+        brand: updates.brand || '',
+        category: updates.category || 'Otros',
+        presentation: updates.presentation || '',
+        description: updates.description || '',
+        imageUrl: updates.imageUrl || '',
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        source: updates.source || 'manual',
+        stockQuantity: updates.stockQuantity ?? 0,
+        salePrice: updates.salePrice,
+      };
     }
 
-    // Re-fetch
-    const all = await this.getAllProducts();
-    const updated = all.find(p => p.id === id);
-    if (!updated) throw new Error('Producto no encontrado para actualizar');
-    return updated;
+    const cleanUpdates: Partial<Product> = {};
+    Object.entries(updates).forEach(([k, v]) => {
+      if (v !== undefined) {
+        (cleanUpdates as any)[k] = v;
+      } else if (k === 'salePrice') {
+        // Explicitly clear salePrice if undefined
+        delete (cleanUpdates as any).salePrice;
+        delete (baseProduct as any).salePrice;
+      }
+    });
+
+    const updatedProduct: Product = {
+      ...baseProduct,
+      ...cleanUpdates,
+      updatedAt: nowIso,
+    };
+
+    if (index !== -1) {
+      local[index] = updatedProduct;
+    } else {
+      local.push(updatedProduct);
+    }
+    saveLocalProducts(local);
+
+    return updatedProduct;
   },
 
   /**

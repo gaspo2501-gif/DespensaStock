@@ -193,7 +193,7 @@ export default function App() {
 
       {/* Editing Product Modal Form */}
       {editingProduct && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
           <ProductForm
             isEditing={true}
             initialData={editingProduct}
@@ -206,7 +206,7 @@ export default function App() {
 
       {/* Manual Creation Modal Form */}
       {showManualForm && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
           <ProductForm
             isEditing={false}
             source="manual"

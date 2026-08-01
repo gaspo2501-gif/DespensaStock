@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Product } from '../../types/product';
 import { StockManager } from './StockManager';
 import { 
@@ -12,7 +12,8 @@ import {
   ScanLine, 
   ArrowLeft,
   AlertTriangle,
-  Info
+  Info,
+  CheckCircle2
 } from 'lucide-react';
 import { getCategoryBadgeColor } from '../../utils/categories';
 
@@ -37,6 +38,15 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   const [imgError, setImgError] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showUpdatedBanner, setShowUpdatedBanner] = useState(false);
+
+  useEffect(() => {
+    setProduct(initialProduct);
+    // If updated date is different from created date or updated recently, show success banner briefly
+    if (initialProduct.updatedAt && initialProduct.updatedAt !== initialProduct.createdAt) {
+      setShowUpdatedBanner(true);
+    }
+  }, [initialProduct]);
 
   const handleStockUpdated = (updated: Product) => {
     setProduct(updated);
@@ -104,6 +114,21 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
 
         {/* Content Body */}
         <div className="p-6 overflow-y-auto space-y-6">
+          {showUpdatedBanner && (
+            <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl text-xs font-semibold flex items-center justify-between gap-2 animate-fadeIn">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                <span>¡Producto actualizado exitosamente en tu base de datos!</span>
+              </div>
+              <button 
+                onClick={() => setShowUpdatedBanner(false)} 
+                className="text-emerald-700 hover:text-emerald-900 font-bold text-sm px-1.5 py-0.5"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
           {/* Main Product Hero */}
           <div className="flex flex-col sm:flex-row items-center gap-5">
             {/* Large Image Frame */}
