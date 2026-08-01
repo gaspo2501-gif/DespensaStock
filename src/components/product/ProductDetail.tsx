@@ -140,6 +140,11 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                 <span className={`text-xs font-medium px-3 py-1 rounded-full border ${categoryBadgeClass}`}>
                   {product.category || 'Sin Categoría'}
                 </span>
+                {typeof product.salePrice === 'number' && product.salePrice > 0 && (
+                  <span className="text-xs font-bold px-3 py-1 rounded-full bg-blue-50 text-blue-800 border border-blue-200 font-mono">
+                    Precio hab: ${product.salePrice.toLocaleString('es-AR')}
+                  </span>
+                )}
               </div>
             </div>
           </div>

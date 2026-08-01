@@ -21,20 +21,36 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   const [isInitializing, setIsInitializing] = useState(false);
 
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const isStoppingRef = useRef(false);
+  const isStartingRef = useRef(false);
+  const isMountedRef = useRef(true);
+  const lastScannedCodeRef = useRef<string | null>(null);
+  const lastScanTimeRef = useRef<number>(0);
+
   const containerId = 'barcode-scanner-viewport';
 
   const stopScanner = useCallback(async () => {
-    if (scannerRef.current) {
-      try {
-        if (scannerRef.current.isScanning) {
-          await scannerRef.current.stop();
-        }
-        scannerRef.current.clear();
-      } catch (err) {
-        console.warn('Error stopping scanner:', err);
-      } finally {
-        scannerRef.current = null;
+    const scanner = scannerRef.current;
+    if (!scanner) return;
+
+    scannerRef.current = null;
+
+    if (isStoppingRef.current) return;
+    isStoppingRef.current = true;
+
+    try {
+      const state = scanner.getState();
+      if (state === 2 || state === 3 || scanner.isScanning) {
+        await scanner.stop();
       }
+      const el = document.getElementById(containerId);
+      if (el) {
+        scanner.clear();
+      }
+    } catch (err) {
+      console.warn('Error stopping scanner:', err);
+    } finally {
+      isStoppingRef.current = false;
     }
   }, []);
 
@@ -42,32 +58,44 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     const cleanCode = decodedText.trim();
     if (!cleanCode) return;
 
-    // Avoid duplicate immediate re-scans
-    if (lastScannedCode === cleanCode) return;
+    const now = Date.now();
+    if (lastScannedCodeRef.current === cleanCode && now - lastScanTimeRef.current < 2000) {
+      return;
+    }
 
-    setLastScannedCode(cleanCode);
+    lastScannedCodeRef.current = cleanCode;
+    lastScanTimeRef.current = now;
+
     playScanSound('found');
-    
-    // Pause scanner briefly
     stopScanner();
-
-    // Trigger parent success handler
     onScanSuccess(cleanCode);
-  }, [lastScannedCode, stopScanner, onScanSuccess]);
+  }, [stopScanner, onScanSuccess]);
 
   const startScanner = useCallback(async () => {
+    if (!isMountedRef.current || isStartingRef.current) return;
+
+    isStartingRef.current = true;
     setIsInitializing(true);
     setErrorMessage(null);
+
     await stopScanner();
+
+    if (!isMountedRef.current) {
+      isStartingRef.current = false;
+      setIsInitializing(false);
+      return;
+    }
 
     try {
       const devices = await Html5Qrcode.getCameras();
       if (!devices || devices.length === 0) {
-        setPermissionState('no_camera');
-        setIsInitializing(false);
+        if (isMountedRef.current) {
+          setPermissionState('no_camera');
+        }
         return;
       }
 
+      if (!isMountedRef.current) return;
       setPermissionState('granted');
 
       const formatsToSupport = [
@@ -80,6 +108,9 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
         Html5QrcodeSupportedFormats.ITF,
       ];
 
+      const el = document.getElementById(containerId);
+      if (!el) return;
+
       const html5Qrcode = new Html5Qrcode(containerId, {
         formatsToSupport,
         verbose: false,
@@ -87,7 +118,6 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
 
       scannerRef.current = html5Qrcode;
 
-      // Prefer rear camera ("environment")
       const config = {
         fps: 15,
         qrbox: { width: 280, height: 160 },
@@ -101,24 +131,35 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
           handleBarcodeDetected(decodedText);
         },
         () => {
-          // Frame decode miss - normal during scanning
+          // Frame decode miss
         }
       );
+
+      if (!isMountedRef.current) {
+        await stopScanner();
+      }
     } catch (err: unknown) {
       console.error('Camera access error:', err);
-      const errorStr = String(err);
-      if (errorStr.includes('NotAllowedError') || errorStr.includes('Permission denied')) {
-        setPermissionState('denied');
-        setErrorMessage('Permiso de cámara denegado. Por favor, habilita el acceso a la cámara en el navegador.');
-      } else {
-        setErrorMessage('No se pudo acceder a la cámara trasera. Asegúrate de estar usando un dispositivo con cámara o intenta la carga manual.');
+      if (isMountedRef.current) {
+        const errorStr = String(err);
+        if (errorStr.includes('NotAllowedError') || errorStr.includes('Permission denied')) {
+          setPermissionState('denied');
+          setErrorMessage('Permiso de cámara denegado. Por favor, habilita el acceso a la cámara en el navegador.');
+        } else {
+          setErrorMessage('No se pudo acceder a la cámara trasera. Asegúrate de estar usando un dispositivo con cámara o intenta la carga manual.');
+        }
       }
     } finally {
-      setIsInitializing(false);
+      isStartingRef.current = false;
+      if (isMountedRef.current) {
+        setIsInitializing(false);
+      }
     }
   }, [stopScanner, handleBarcodeDetected]);
 
   useEffect(() => {
+    isMountedRef.current = true;
+
     if (isScanningActive && !showManualInput) {
       startScanner();
     } else {
@@ -126,6 +167,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     }
 
     return () => {
+      isMountedRef.current = false;
       stopScanner();
     };
   }, [isScanningActive, showManualInput, startScanner, stopScanner]);

@@ -7,6 +7,7 @@ import { Home } from './pages/Home';
 import { ScanPage } from './pages/ScanPage';
 import { SearchPage } from './pages/SearchPage';
 import { ProductListPage } from './pages/ProductListPage';
+import { SalesPage } from './pages/SalesPage';
 import { ProductDetail } from './components/product/ProductDetail';
 import { ProductForm } from './components/product/ProductForm';
 import { Loader2, AlertCircle, RefreshCw } from 'lucide-react';
@@ -49,6 +50,13 @@ export default function App() {
     });
   };
 
+  const handleProductsBatchUpdated = (updatedList: Product[]) => {
+    setProducts((prev) => {
+      const updatedMap = new Map(updatedList.map((p) => [p.id, p]));
+      return prev.map((p) => updatedMap.get(p.id) || p);
+    });
+  };
+
   const handleUpdateProductSubmit = async (inputData: CreateProductInput) => {
     if (!editingProduct) return;
     const updated = await productService.updateProduct(editingProduct.id, {
@@ -59,6 +67,7 @@ export default function App() {
       description: inputData.description,
       imageUrl: inputData.imageUrl,
       stockQuantity: inputData.stockQuantity,
+      salePrice: inputData.salePrice,
     });
 
     handleProductSaved(updated);
@@ -139,6 +148,15 @@ export default function App() {
                 onSelectProduct={setSelectedProduct}
                 onEditProduct={(p) => setEditingProduct(p)}
                 onDeleteProduct={handleDeleteProduct}
+              />
+            )}
+
+            {currentTab === 'sales' && (
+              <SalesPage
+                products={products}
+                onProductsUpdated={handleProductsBatchUpdated}
+                onNavigateToScan={() => setCurrentTab('scan')}
+                onNavigateHome={() => setCurrentTab('home')}
               />
             )}
 

@@ -28,6 +28,7 @@ export const ProductForm: React.FC<ProductFormProps> = ({
   const [description, setDescription] = useState(initialData?.description || '');
   const [imageUrl, setImageUrl] = useState(initialData?.imageUrl || '');
   const [stockQuantity, setStockQuantity] = useState<number>(initialData?.stockQuantity ?? 1);
+  const [salePrice, setSalePrice] = useState<string>(initialData?.salePrice ? initialData.salePrice.toString() : '');
   const [customCategory, setCustomCategory] = useState('');
   const [isCustomCategory, setIsCustomCategory] = useState(false);
 
@@ -69,6 +70,7 @@ export const ProductForm: React.FC<ProductFormProps> = ({
         imageUrl: imageUrl.trim(),
         source: isEditing ? (initialData?.source || 'manual') : source,
         stockQuantity: isNaN(stockQuantity) || stockQuantity < 0 ? 0 : stockQuantity,
+        salePrice: salePrice && !isNaN(parseFloat(salePrice)) && parseFloat(salePrice) >= 0 ? parseFloat(salePrice) : undefined,
       });
 
       setSuccess(true);
@@ -182,25 +184,38 @@ export const ProductForm: React.FC<ProductFormProps> = ({
           </div>
         </div>
 
-        {/* Initial Stock Input Field */}
-        <div className="p-4 bg-emerald-50/80 border border-emerald-200 rounded-2xl">
-          <label className="block text-xs font-bold text-emerald-900 uppercase tracking-wider mb-1 flex items-center justify-between">
-            <span>{isEditing ? 'Stock Actual (Unidades)' : 'Cantidad Inicial de Stock'}</span>
-            <span className="text-[10px] text-emerald-700 font-normal">Conteo Físico</span>
-          </label>
-          <div className="flex items-center gap-2">
+        {/* Initial Stock & Default Sale Price Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="p-4 bg-emerald-50/80 border border-emerald-200 rounded-2xl">
+            <label className="block text-xs font-bold text-emerald-900 uppercase tracking-wider mb-1 flex items-center justify-between">
+              <span>{isEditing ? 'Stock Actual' : 'Stock Inicial'}</span>
+              <span className="text-[10px] text-emerald-700 font-normal">Unidades</span>
+            </label>
             <input
               type="number"
               min="0"
               value={stockQuantity}
               onChange={(e) => setStockQuantity(parseInt(e.target.value, 10) || 0)}
-              className="w-full px-4 py-2.5 bg-white border border-emerald-300 rounded-xl text-slate-900 font-mono font-bold text-base focus:ring-2 focus:ring-emerald-500 outline-none"
+              className="w-full px-4 py-2 bg-white border border-emerald-300 rounded-xl text-slate-900 font-mono font-bold text-base focus:ring-2 focus:ring-emerald-500 outline-none"
               required
             />
           </div>
-          <p className="text-[11px] text-emerald-800 mt-1">
-            Indica cuántas unidades existen actualmente en el inventario.
-          </p>
+
+          <div className="p-4 bg-blue-50/80 border border-blue-200 rounded-2xl">
+            <label className="block text-xs font-bold text-blue-900 uppercase tracking-wider mb-1 flex items-center justify-between">
+              <span>Precio Habitual</span>
+              <span className="text-[10px] text-blue-700 font-normal">$ ARS</span>
+            </label>
+            <input
+              type="number"
+              min="0"
+              step="any"
+              placeholder="Ej: 1500"
+              value={salePrice}
+              onChange={(e) => setSalePrice(e.target.value)}
+              className="w-full px-4 py-2 bg-white border border-blue-300 rounded-xl text-slate-900 font-mono font-bold text-base focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+          </div>
         </div>
 
         {/* Category Selector */}

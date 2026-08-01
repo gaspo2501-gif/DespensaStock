@@ -67,6 +67,7 @@ export const productService = {
           updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : (data.updatedAt || new Date().toISOString()),
           source: data.source || 'local',
           stockQuantity: data.stockQuantity ?? data.stock ?? 0,
+          salePrice: data.salePrice ?? data.price ?? undefined,
         };
       }
     } catch (error) {
@@ -103,6 +104,7 @@ export const productService = {
           updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : (data.updatedAt || new Date().toISOString()),
           source: data.source || 'local',
           stockQuantity: data.stockQuantity ?? data.stock ?? 0,
+          salePrice: data.salePrice ?? data.price ?? undefined,
         });
       });
 
@@ -154,24 +156,31 @@ export const productService = {
       updatedAt: nowIso,
       source: input.source || 'manual',
       stockQuantity: initialStock,
+      salePrice: input.salePrice,
     };
+
+    const docData: Record<string, any> = {
+      barcode: newProduct.barcode,
+      name: newProduct.name,
+      brand: newProduct.brand,
+      category: newProduct.category,
+      presentation: newProduct.presentation,
+      description: newProduct.description,
+      imageUrl: newProduct.imageUrl,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      source: newProduct.source,
+      stockQuantity: initialStock,
+      stock: initialStock,
+    };
+
+    if (typeof input.salePrice === 'number' && !isNaN(input.salePrice) && input.salePrice >= 0) {
+      docData.salePrice = input.salePrice;
+    }
 
     try {
       const docRef = doc(db, PRODUCTS_COLLECTION, docId);
-      await setDoc(docRef, {
-        barcode: newProduct.barcode,
-        name: newProduct.name,
-        brand: newProduct.brand,
-        category: newProduct.category,
-        presentation: newProduct.presentation,
-        description: newProduct.description,
-        imageUrl: newProduct.imageUrl,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        source: newProduct.source,
-        stockQuantity: initialStock,
-        stock: initialStock,
-      });
+      await setDoc(docRef, docData);
     } catch (error) {
       console.warn('Error saving to Firestore, saved to local cache:', error);
     }
@@ -278,12 +287,25 @@ export const productService = {
   async updateProduct(id: string, updates: Partial<Product>): Promise<Product> {
     const nowIso = new Date().toISOString();
     
+    const firestoreUpdates: Record<string, any> = {
+      updatedAt: serverTimestamp(),
+    };
+
+    Object.entries(updates).forEach(([key, val]) => {
+      if (val !== undefined && val !== null) {
+        if (key === 'salePrice') {
+          if (typeof val === 'number' && !isNaN(val) && val >= 0) {
+            firestoreUpdates.salePrice = val;
+          }
+        } else {
+          firestoreUpdates[key] = val;
+        }
+      }
+    });
+
     try {
       const docRef = doc(db, PRODUCTS_COLLECTION, id);
-      await updateDoc(docRef, {
-        ...updates,
-        updatedAt: serverTimestamp(),
-      });
+      await updateDoc(docRef, firestoreUpdates);
     } catch (error) {
       console.warn('Error updating Firestore doc:', error);
     }
@@ -291,7 +313,14 @@ export const productService = {
     const local = getLocalProducts();
     const index = local.findIndex(p => p.id === id);
     if (index !== -1) {
-      local[index] = { ...local[index], ...updates, updatedAt: nowIso };
+      const cleanLocalUpdates: Partial<Product> = {};
+      Object.entries(updates).forEach(([k, v]) => {
+        if (v !== undefined) {
+          (cleanLocalUpdates as any)[k] = v;
+        }
+      });
+
+      local[index] = { ...local[index], ...cleanLocalUpdates, updatedAt: nowIso };
       saveLocalProducts(local);
       return local[index];
     }

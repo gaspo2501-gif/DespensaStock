@@ -93,6 +93,12 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                 {product.presentation}
               </p>
             )}
+
+            {typeof product.salePrice === 'number' && product.salePrice > 0 && (
+              <p className="text-xs font-black text-blue-700 mt-1 font-mono">
+                ${product.salePrice.toLocaleString('es-AR')}
+              </p>
+            )}
           </div>
         </div>
 

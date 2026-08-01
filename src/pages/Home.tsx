@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { NavigationTab, Product } from '../types/product';
-import { ScanLine, Search, Package, PlusCircle, ShieldCheck, Layers, ArrowRight, Barcode, Database, CheckCircle2 } from 'lucide-react';
+import { ScanLine, Search, Package, PlusCircle, ShieldCheck, Layers, ArrowRight, Barcode, Database, CheckCircle2, ShoppingCart } from 'lucide-react';
 import { ProductCard } from '../components/product/ProductCard';
 
 interface HomeProps {
@@ -256,37 +256,37 @@ export const Home: React.FC<HomeProps> = ({
             <h3 className="font-extrabold text-base mb-1 text-white">Navegación Rápida</h3>
             <p className="text-xs text-emerald-200/80 mb-4">Accesos directos de la aplicación</p>
             
-            <div className="grid grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                onClick={() => onNavigate('sales')}
+                className="bg-emerald-500 hover:bg-emerald-400 p-2.5 rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-colors text-slate-950 font-bold border border-emerald-400 col-span-3 mb-1"
+              >
+                <ShoppingCart className="w-5 h-5 mb-1 text-slate-950" />
+                <span className="text-xs font-black">NUEVA VENTA (CARRITO)</span>
+              </button>
+
               <button
                 onClick={() => onNavigate('home')}
-                className="bg-emerald-900/80 hover:bg-emerald-800 p-3.5 rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-colors border border-emerald-800/60"
+                className="bg-emerald-900/80 hover:bg-emerald-800 p-2.5 rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-colors border border-emerald-800/60"
               >
-                <Barcode className="w-5 h-5 mb-1 text-emerald-300" />
-                <span className="text-xs font-bold text-white">Inicio</span>
+                <Barcode className="w-4 h-4 mb-1 text-emerald-300" />
+                <span className="text-[11px] font-bold text-white">Inicio</span>
               </button>
 
               <button
                 onClick={() => onNavigate('scan')}
-                className="bg-emerald-900/80 hover:bg-emerald-800 p-3.5 rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-colors border border-emerald-800/60"
+                className="bg-emerald-900/80 hover:bg-emerald-800 p-2.5 rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-colors border border-emerald-800/60"
               >
-                <ScanLine className="w-5 h-5 mb-1 text-emerald-300" />
-                <span className="text-xs font-bold text-white">Escáner</span>
-              </button>
-
-              <button
-                onClick={() => onNavigate('search')}
-                className="bg-emerald-900/80 hover:bg-emerald-800 p-3.5 rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-colors border border-emerald-800/60"
-              >
-                <Search className="w-5 h-5 mb-1 text-emerald-300" />
-                <span className="text-xs font-bold text-white">Buscar</span>
+                <ScanLine className="w-4 h-4 mb-1 text-emerald-300" />
+                <span className="text-[11px] font-bold text-white">Escáner</span>
               </button>
 
               <button
                 onClick={() => onNavigate('list')}
-                className="bg-emerald-900/80 hover:bg-emerald-800 p-3.5 rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-colors border border-emerald-800/60"
+                className="bg-emerald-900/80 hover:bg-emerald-800 p-2.5 rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-colors border border-emerald-800/60"
               >
-                <Package className="w-5 h-5 mb-1 text-emerald-300" />
-                <span className="text-xs font-bold text-white">Inventario</span>
+                <Package className="w-4 h-4 mb-1 text-emerald-300" />
+                <span className="text-[11px] font-bold text-white">Catálogo</span>
               </button>
             </div>
           </div>
