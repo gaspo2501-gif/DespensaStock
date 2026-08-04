@@ -9,6 +9,7 @@ import { providerService } from '../../services/firebase/providerService';
 import { ProviderModal } from '../provider/ProviderModal';
 import { BarcodeScanner } from '../scanner/BarcodeScanner';
 import { ProductForm } from '../product/ProductForm';
+import { NumericInput } from '../common/NumericInput';
 import { playScanSound } from '../../utils/audio';
 import { 
   Truck, 
@@ -449,11 +450,11 @@ export const PurchaseEntry: React.FC<PurchaseEntryProps> = ({
                       <div>
                         <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Cantidad</label>
                         <div className="flex items-center gap-1">
-                          <input
-                            type="number"
+                          <NumericInput
                             min="1"
+                            allowDecimal={false}
                             value={item.quantity}
-                            onChange={(e) => handleUpdateItemQty(item.product.id, parseInt(e.target.value, 10))}
+                            onChangeValue={(val) => handleUpdateItemQty(item.product.id, val)}
                             className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-900 font-mono font-bold text-center outline-none focus:ring-1 focus:ring-emerald-500"
                           />
                         </div>
@@ -462,12 +463,12 @@ export const PurchaseEntry: React.FC<PurchaseEntryProps> = ({
                       {/* Unit Cost Input */}
                       <div>
                         <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Costo Unit. ($)</label>
-                        <input
-                          type="number"
+                        <NumericInput
                           min="0"
                           step="any"
+                          allowDecimal={true}
                           value={item.unitCost}
-                          onChange={(e) => handleUpdateItemCost(item.product.id, parseFloat(e.target.value))}
+                          onChangeValue={(val) => handleUpdateItemCost(item.product.id, val)}
                           className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-900 font-mono font-bold text-center outline-none focus:ring-1 focus:ring-emerald-500"
                         />
                       </div>
@@ -475,12 +476,12 @@ export const PurchaseEntry: React.FC<PurchaseEntryProps> = ({
                       {/* Final Sale Price Input */}
                       <div>
                         <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Precio Venta ($)</label>
-                        <input
-                          type="number"
+                        <NumericInput
                           min="0"
                           step="any"
+                          allowDecimal={true}
                           value={item.finalSalePrice}
-                          onChange={(e) => handleUpdateItemSalePrice(item.product.id, parseFloat(e.target.value))}
+                          onChangeValue={(val) => handleUpdateItemSalePrice(item.product.id, val)}
                           className="w-full px-2.5 py-1.5 bg-white border border-emerald-300 rounded-lg text-emerald-900 font-mono font-bold text-center outline-none focus:ring-1 focus:ring-emerald-500"
                         />
                       </div>
@@ -643,11 +644,11 @@ export const PurchaseEntry: React.FC<PurchaseEntryProps> = ({
                   <label className="block text-[10px] font-bold text-emerald-900 uppercase mb-1">
                     Cantidad a Ingresar <span className="text-rose-500">*</span>
                   </label>
-                  <input
-                    type="number"
+                  <NumericInput
                     min="1"
+                    allowDecimal={false}
                     value={pendingQty}
-                    onChange={(e) => setPendingQty(parseInt(e.target.value, 10) || 1)}
+                    onChangeValue={(val) => setPendingQty(val || 1)}
                     className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-xl font-mono font-bold text-slate-900 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                   />
                 </div>
@@ -656,13 +657,12 @@ export const PurchaseEntry: React.FC<PurchaseEntryProps> = ({
                   <label className="block text-[10px] font-bold text-blue-900 uppercase mb-1">
                     Costo Unitario ($) <span className="text-rose-500">*</span>
                   </label>
-                  <input
-                    type="number"
+                  <NumericInput
                     min="0"
                     step="any"
+                    allowDecimal={true}
                     value={pendingCost}
-                    onChange={(e) => {
-                      const c = parseFloat(e.target.value) || 0;
+                    onChangeValue={(c) => {
                       setPendingCost(c);
                       const sugg = calculateSuggestedSalePrice(c);
                       const prevCost = pendingProduct.currentCost ?? pendingProduct.lastCost ?? pendingProduct.costPrice ?? 0;
@@ -717,12 +717,12 @@ export const PurchaseEntry: React.FC<PurchaseEntryProps> = ({
                 <label className="block text-[10px] font-bold text-emerald-900 uppercase mb-1">
                   Precio de Venta Final ($)
                 </label>
-                <input
-                  type="number"
+                <NumericInput
                   min="0"
                   step="any"
+                  allowDecimal={true}
                   value={pendingFinalSalePrice}
-                  onChange={(e) => setPendingFinalSalePrice(parseFloat(e.target.value) || 0)}
+                  onChangeValue={(val) => setPendingFinalSalePrice(val)}
                   className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-xl font-mono font-bold text-emerald-900 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                 />
               </div>

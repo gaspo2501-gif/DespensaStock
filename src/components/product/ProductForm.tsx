@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Product, CreateProductInput, ProductSource } from '../../types/product';
 import { PRODUCT_CATEGORIES } from '../../utils/categories';
+import { NumericInput } from '../common/NumericInput';
 import { Save, Barcode, AlertCircle, CheckCircle2, ArrowLeft, Image as ImageIcon } from 'lucide-react';
 
 interface ProductFormProps {
@@ -196,11 +197,11 @@ export const ProductForm: React.FC<ProductFormProps> = ({
                 <span>{isEditing ? 'Stock Actual' : 'Stock Inicial'}</span>
                 <span className="text-[10px] text-emerald-700 font-normal">Unidades</span>
               </label>
-              <input
-                type="number"
+              <NumericInput
                 min="0"
+                allowDecimal={false}
                 value={stockQuantity}
-                onChange={(e) => setStockQuantity(parseInt(e.target.value, 10) || 0)}
+                onChangeValue={(val) => setStockQuantity(val)}
                 className="w-full px-4 py-2 bg-white border border-emerald-300 rounded-xl text-slate-900 font-mono font-bold text-base focus:ring-2 focus:ring-emerald-500 outline-none"
                 required
               />
@@ -211,13 +212,13 @@ export const ProductForm: React.FC<ProductFormProps> = ({
                 <span>Precio Habitual</span>
                 <span className="text-[10px] text-blue-700 font-normal">$ ARS</span>
               </label>
-              <input
-                type="number"
+              <NumericInput
                 min="0"
                 step="any"
+                allowDecimal={true}
                 placeholder="Ej: 1500"
                 value={salePrice}
-                onChange={(e) => setSalePrice(e.target.value)}
+                onChangeRaw={(e) => setSalePrice(e.target.value)}
                 className="w-full px-4 py-2 bg-white border border-blue-300 rounded-xl text-slate-900 font-mono font-bold text-base focus:ring-2 focus:ring-blue-500 outline-none"
               />
             </div>

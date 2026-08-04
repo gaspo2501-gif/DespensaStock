@@ -1,7 +1,27 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { NavigationTab, Product } from '../types/product';
-import { ScanLine, Search, Package, PlusCircle, ShieldCheck, Layers, ArrowRight, Barcode, Database, CheckCircle2, ShoppingCart, Users, Boxes } from 'lucide-react';
-import { ProductCard } from '../components/product/ProductCard';
+import { SaleRecord } from '../types/sale';
+import { salesService } from '../services/firebase/salesService';
+import { accountService } from '../services/firebase/accountService';
+import { 
+  ShoppingCart, 
+  ScanLine, 
+  Boxes, 
+  Users, 
+  DollarSign, 
+  Package, 
+  TrendingUp, 
+  AlertTriangle, 
+  ArrowRight, 
+  RefreshCw, 
+  Receipt, 
+  Search, 
+  Plus, 
+  CheckCircle2, 
+  Clock,
+  ExternalLink,
+  ChevronRight
+} from 'lucide-react';
 
 interface HomeProps {
   onNavigate: (tab: NavigationTab) => void;
@@ -16,23 +36,62 @@ export const Home: React.FC<HomeProps> = ({
   onSelectProduct,
   onManualAdd,
 }) => {
-  const [quickSearchQuery, setQuickSearchQuery] = useState('');
-  const recentProducts = [...products].slice(-4).reverse();
+  const [recentSales, setRecentSales] = useState<SaleRecord[]>([]);
+  const [totalDebts, setTotalDebts] = useState<number>(0);
+  const [loadingDashboard, setLoadingDashboard] = useState<boolean>(true);
+  const [quickSearchQuery, setQuickSearchQuery] = useState<string>('');
 
-  // Dynamic category calculations for insights card
-  const categoryStats = useMemo(() => {
-    const counts: Record<string, number> = {};
-    products.forEach((p) => {
-      const cat = p.category || 'Otros';
-      counts[cat] = (counts[cat] || 0) + 1;
+  // Fetch sales and debts on mount
+  const loadDashboardData = useCallback(async () => {
+    setLoadingDashboard(true);
+    try {
+      const [salesData, balancesData] = await Promise.all([
+        salesService.getRecentSales(),
+        accountService.getAllBalances(),
+      ]);
+
+      setRecentSales(salesData);
+
+      // Sum all customer balances for "Cuentas por cobrar"
+      const debtSum = Object.values(balancesData).reduce((acc, curr) => acc + (curr > 0 ? curr : 0), 0);
+      setTotalDebts(debtSum);
+    } catch (err) {
+      console.warn('Error al cargar datos del dashboard:', err);
+    } fontally: {
+      setLoadingDashboard(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadDashboardData();
+  }, [loadDashboardData]);
+
+  // Compute Today's Sales
+  const todaySalesData = useMemo(() => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const salesToday = recentSales.filter((s) => {
+      const saleDateStr = new Date(s.createdAt).toISOString().split('T')[0];
+      return saleDateStr === todayStr;
     });
-    const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-    const total = products.length || 1;
-    return sorted.slice(0, 3).map(([category, count]) => ({
-      category,
-      count,
-      percentage: Math.min(100, Math.round((count / total) * 100)),
-    }));
+
+    const totalAmountToday = salesToday.reduce((acc, s) => acc + s.totalAmount, 0);
+    const countToday = salesToday.length;
+
+    return {
+      totalAmountToday,
+      countToday,
+      salesToday,
+    };
+  }, [recentSales]);
+
+  // Compute total inventory stock
+  const totalStockUnits = useMemo(() => {
+    return products.reduce((acc, p) => acc + (p.stockQuantity || 0), 0);
+  }, [products]);
+
+  // Low or zero stock products
+  const lowStockProducts = useMemo(() => {
+    return products.filter((p) => (p.stockQuantity || 0) <= 3).slice(0, 5);
   }, [products]);
 
   const handleQuickSearchSubmit = (e: React.FormEvent) => {
@@ -41,302 +100,297 @@ export const Home: React.FC<HomeProps> = ({
   };
 
   return (
-    <div className="space-y-6 pb-20 animate-fadeIn">
-      {/* Bento Grid Container */}
-      <div className="grid grid-cols-12 gap-4">
-
-        {/* 1. Header / Branding Bento Card */}
-        <div className="col-span-12 md:col-span-4 bento-card justify-between border-emerald-100 hover:border-emerald-300">
-          <div className="flex items-center space-x-3">
-            <div className="bg-emerald-600 p-3 rounded-2xl shadow-md text-white">
-              <Barcode className="w-6 h-6" />
-            </div>
-            <div>
-              <h1 className="font-extrabold text-xl leading-none text-slate-900 tracking-tight">
-                Despensa Stock
-              </h1>
-              <div className="flex items-center gap-1.5 mt-1.5">
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 uppercase tracking-wider">
-                  v1.0.0 Stable
-                </span>
-              </div>
-            </div>
+    <div className="space-y-6 pb-24 max-w-5xl mx-auto animate-fadeIn">
+      {/* HEADER / WELCOME BANNER */}
+      <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-2xl bg-slate-900 text-emerald-400 flex items-center justify-center shadow-md">
+            <TrendingUp className="w-6 h-6 stroke-[2.5]" />
           </div>
-          <p className="text-xs text-slate-500 mt-4 leading-relaxed font-medium">
-            Sistema inteligente para escaneo de códigos EAN/UPC y control centralizado de productos.
-          </p>
-        </div>
-
-        {/* 2. Quick Search Bento Module */}
-        <div className="col-span-12 md:col-span-5 bento-card justify-center">
-          <label className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-2 flex items-center justify-between">
-            <span>Buscador de productos</span>
-            <span className="text-[10px] text-slate-400 font-mono">EAN / Nombre</span>
-          </label>
-          <form onSubmit={handleQuickSearchSubmit} className="relative">
-            <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-              <Search className="h-5 w-5" />
-            </span>
-            <input
-              type="text"
-              value={quickSearchQuery}
-              onChange={(e) => setQuickSearchQuery(e.target.value)}
-              onFocus={() => onNavigate('search')}
-              placeholder="Buscar por nombre, marca o EAN..."
-              className="block w-full pl-11 pr-10 py-3 border border-slate-200 rounded-2xl bg-slate-50 focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none text-sm text-slate-900 font-medium transition-all"
-            />
-            <button
-              type="submit"
-              className="absolute inset-y-1.5 right-1.5 px-3 bg-emerald-600 text-white rounded-xl text-xs font-semibold hover:bg-emerald-700 transition-colors flex items-center gap-1"
-            >
-              Ir
-            </button>
-          </form>
-        </div>
-
-        {/* 3. Firebase Cloud Sync Status Bento Card */}
-        <div className="col-span-12 md:col-span-3 bento-card justify-between border-slate-200">
-          <div className="flex justify-between items-center">
-            <div className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-              <Database className="w-3.5 h-3.5 text-slate-400" />
-              Firebase Cloud
-            </div>
-            <div className="flex items-center text-xs font-semibold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-100">
-              <span className="status-dot"></span> Sincronizado
-            </div>
-          </div>
-          <div className="mt-3">
-            <div className="text-3xl font-black text-slate-900 tracking-tight">
-              {products.length}{' '}
-              <span className="text-xs font-semibold text-slate-400 tracking-normal uppercase">
-                Productos
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-black text-slate-900 tracking-tight">Panel de Gestión</h1>
+              <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 uppercase tracking-wider">
+                Despensa
               </span>
             </div>
-            <p className="text-[11px] text-emerald-700 font-bold mt-1">
-              Stock total: {products.reduce((acc, p) => acc + (p.stockQuantity || 0), 0)} unidades
+            <p className="text-xs text-slate-500 font-medium">Indicadores comerciales y control diario en tiempo real</p>
+          </div>
+        </div>
+
+        <button
+          onClick={loadDashboardData}
+          disabled={loadingDashboard}
+          className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-2xl transition-colors flex items-center gap-1.5 text-xs"
+          title="Actualizar datos"
+        >
+          <RefreshCw className={`w-4 h-4 ${loadingDashboard ? 'animate-spin' : ''}`} />
+          <span className="hidden sm:inline">Actualizar</span>
+        </button>
+      </div>
+
+      {/* 2.1 KPI CARDS GRID */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+        {/* Card 1: Ventas de Hoy */}
+        <div className="p-4 bg-emerald-700 text-white rounded-3xl shadow-md space-y-2 flex flex-col justify-between">
+          <div className="flex items-center justify-between text-emerald-100">
+            <span className="text-[10px] font-black uppercase tracking-wider">Ventas de Hoy</span>
+            <DollarSign className="w-4 h-4 text-emerald-300" />
+          </div>
+          <div>
+            <div className="text-2xl font-black font-mono">
+              ${todaySalesData.totalAmountToday.toLocaleString('es-AR')}
+            </div>
+            <p className="text-[11px] font-semibold text-emerald-200 mt-0.5">
+              {todaySalesData.countToday} {todaySalesData.countToday === 1 ? 'venta realizada' : 'ventas realizadas'}
             </p>
           </div>
         </div>
 
-        {/* 4. Scanner Primary Hero Bento Card */}
-        <div className="col-span-12 lg:col-span-5 bento-card p-0 overflow-hidden relative border-2 border-emerald-500/80 shadow-md group">
-          <div className="bg-slate-950 flex flex-col h-full min-h-[320px]">
-            {/* Camera Frame Visual Simulation */}
-            <div className="flex-1 relative flex items-center justify-center p-6 min-h-[200px] overflow-hidden bg-gradient-to-b from-slate-950 via-slate-900 to-emerald-950/40">
-              <div className="w-56 h-36 border-2 border-white/30 rounded-3xl relative flex items-center justify-center backdrop-blur-xs">
-                <div className="scan-line absolute w-full"></div>
-                <div className="absolute -top-2 -left-2 w-6 h-6 border-t-4 border-l-4 border-emerald-400 rounded-tl-lg"></div>
-                <div className="absolute -top-2 -right-2 w-6 h-6 border-t-4 border-r-4 border-emerald-400 rounded-tr-lg"></div>
-                <div className="absolute -bottom-2 -left-2 w-6 h-6 border-b-4 border-l-4 border-emerald-400 rounded-bl-lg"></div>
-                <div className="absolute -bottom-2 -right-2 w-6 h-6 border-b-4 border-r-4 border-emerald-400 rounded-br-lg"></div>
-                
-                <div className="text-center p-2">
-                  <ScanLine className="w-8 h-8 text-emerald-400 mx-auto animate-pulse" />
-                  <span className="text-[10px] text-emerald-300 font-mono mt-1 block">LECTOR ZBAR / HTML5</span>
-                </div>
-              </div>
-              
-              <div className="absolute bottom-3 left-0 right-0 text-center">
-                <p className="text-white/80 text-[10px] font-semibold uppercase tracking-widest bg-slate-900/80 inline-block px-3 py-1 rounded-full border border-white/10">
-                  Alinee el código de barras comercial
-                </p>
-              </div>
-            </div>
-
-            {/* Scanner Action Controls Container */}
-            <div className="bg-white p-5 rounded-t-3xl border-t border-slate-100 flex flex-col justify-between space-y-3">
-              <div className="flex justify-between items-center">
-                <div>
-                  <h3 className="font-extrabold text-base text-slate-900 flex items-center gap-2">
-                    Escanear Código
-                  </h3>
-                  <p className="text-xs text-slate-500 font-medium">Lector automático de cámara activa</p>
-                </div>
-                <div className="p-2 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-100">
-                  <CheckCircle2 className="w-5 h-5" />
-                </div>
-              </div>
-
-              <button
-                onClick={() => onNavigate('scan')}
-                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-3.5 px-4 rounded-2xl shadow-md shadow-emerald-600/20 flex items-center justify-center space-x-2 transition-all active:scale-[0.99] group-hover:bg-emerald-500 cursor-pointer"
-              >
-                <ScanLine className="w-5 h-5" />
-                <span className="tracking-wide">ACTIVAR CÁMARA Y ESCANEAR</span>
-              </button>
-            </div>
+        {/* Card 2: Productos Registrados */}
+        <div className="p-4 bg-white border border-slate-200 rounded-3xl shadow-2xs space-y-2 flex flex-col justify-between">
+          <div className="flex items-center justify-between text-slate-500">
+            <span className="text-[10px] font-black uppercase tracking-wider">Productos Catálogo</span>
+            <Package className="w-4 h-4 text-slate-400" />
           </div>
-        </div>
-
-        {/* 5. Recent Items Bento Card */}
-        <div className="col-span-12 lg:col-span-7 bento-card justify-between">
-          <div className="flex justify-between items-center mb-4">
-            <div>
-              <h2 className="font-extrabold text-lg text-slate-900">Productos Recientes</h2>
-              <p className="text-xs text-slate-500">Últimas altas registradas en el catálogo</p>
-            </div>
-            <button
-              onClick={() => onNavigate('list')}
-              className="text-emerald-600 font-bold text-xs hover:underline flex items-center gap-1 bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-100"
-            >
-              Ver todos ({products.length})
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          {recentProducts.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {recentProducts.map((p) => (
-                <ProductCard
-                  key={p.id}
-                  product={p}
-                  onClick={() => onSelectProduct(p)}
-                  showActions={false}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="p-8 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-              <Package className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-              <p className="text-xs font-semibold text-slate-600">Aún no hay productos guardados</p>
-              <p className="text-[11px] text-slate-400 mt-1">Escanea tu primer producto para comenzar</p>
-            </div>
-          )}
-
-          {/* Quick Manual Entry Trigger Bar */}
-          <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
-            <span className="text-xs text-slate-500 font-medium">¿Sin el producto físico?</span>
-            <button
-              onClick={onManualAdd}
-              className="text-xs font-bold text-slate-800 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-colors"
-            >
-              <PlusCircle className="w-4 h-4 text-emerald-600" />
-              Carga Manual Directa
-            </button>
-          </div>
-        </div>
-
-        {/* 6. Popular Categories Stats Bento Card */}
-        <div className="col-span-12 md:col-span-4 bento-card justify-between">
           <div>
-            <h3 className="font-extrabold text-base text-slate-900 mb-1">Categorías Principales</h3>
-            <p className="text-xs text-slate-500 mb-4">Distribución de stock por rubro</p>
-            
-            <div className="space-y-3">
-              {categoryStats.length > 0 ? (
-                categoryStats.map((item) => (
-                  <div key={item.category} className="space-y-1">
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="text-slate-600 font-medium">{item.category}</span>
-                      <span className="font-bold text-slate-900">{item.count} un.</span>
-                    </div>
-                    <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                      <div
-                        className="bg-emerald-500 h-2 rounded-full transition-all duration-500"
-                        style={{ width: `${item.percentage}%` }}
-                      ></div>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="text-xs text-slate-400 py-4 text-center">Sin datos de categorías</div>
-              )}
+            <div className="text-2xl font-black font-mono text-slate-900">
+              {products.length}
             </div>
-          </div>
-
-          <div className="mt-4 text-[11px] text-slate-400 border-t border-slate-100 pt-3 flex justify-between">
-            <span>Variedad total</span>
-            <span className="font-bold text-slate-700">{categoryStats.length} Rubros</span>
+            <p className="text-[11px] font-semibold text-slate-500 mt-0.5">
+              En catálogo activo
+            </p>
           </div>
         </div>
 
-        {/* 7. Quick Navigation Bento Card (Dark Theme Variant) */}
-        <div className="col-span-12 md:col-span-4 bento-card bg-emerald-950 text-white border-0 shadow-lg justify-between">
+        {/* Card 3: Stock Total */}
+        <div className="p-4 bg-white border border-slate-200 rounded-3xl shadow-2xs space-y-2 flex flex-col justify-between">
+          <div className="flex items-center justify-between text-slate-500">
+            <span className="text-[10px] font-black uppercase tracking-wider">Stock Total</span>
+            <Boxes className="w-4 h-4 text-indigo-500" />
+          </div>
           <div>
-            <h3 className="font-extrabold text-base mb-1 text-white">Navegación Rápida</h3>
-            <p className="text-xs text-emerald-200/80 mb-4">Accesos directos de la aplicación</p>
-            
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              <button
-                onClick={() => onNavigate('sales')}
-                className="bg-emerald-500 hover:bg-emerald-400 p-3 rounded-2xl flex items-center justify-center gap-2 cursor-pointer transition-colors text-slate-950 font-bold border border-emerald-400 col-span-2 sm:col-span-4 mb-0.5"
-              >
-                <ShoppingCart className="w-5 h-5 text-slate-950" />
-                <span className="text-xs font-black">NUEVA VENTA (CARRITO)</span>
-              </button>
+            <div className="text-2xl font-black font-mono text-slate-900">
+              {totalStockUnits.toLocaleString('es-AR')}
+            </div>
+            <p className="text-[11px] font-semibold text-slate-500 mt-0.5">
+              Unidades en estantería
+            </p>
+          </div>
+        </div>
 
+        {/* Card 4: Cuentas por Cobrar */}
+        <div className="p-4 bg-white border border-rose-200 bg-rose-50/40 rounded-3xl shadow-2xs space-y-2 flex flex-col justify-between">
+          <div className="flex items-center justify-between text-rose-800">
+            <span className="text-[10px] font-black uppercase tracking-wider">Cuentas por Cobrar</span>
+            <Users className="w-4 h-4 text-rose-600" />
+          </div>
+          <div>
+            <div className="text-2xl font-black font-mono text-rose-700">
+              ${totalDebts.toLocaleString('es-AR')}
+            </div>
+            <p className="text-[11px] font-semibold text-rose-600/80 mt-0.5">
+              Deuda total fiada
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* 2.2 BOTONERA COMERCIAL (DAILY ACTIONS) */}
+      <div className="p-5 bg-white border border-slate-200 rounded-3xl shadow-2xs space-y-3">
+        <h2 className="text-xs font-black uppercase tracking-wider text-slate-500">
+          Operaciones Frecuentes
+        </h2>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {/* Action 1: Nueva Venta */}
+          <button
+            onClick={() => onNavigate('sales')}
+            className="p-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-extrabold text-xs shadow-md transition-all flex flex-col items-center justify-center gap-2 text-center active:scale-98"
+          >
+            <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center text-white">
+              <ShoppingCart className="w-5 h-5" />
+            </div>
+            <span>NUEVA VENTA</span>
+          </button>
+
+          {/* Action 2: Escáner */}
+          <button
+            onClick={() => onNavigate('scan')}
+            className="p-4 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-extrabold text-xs shadow-md transition-all flex flex-col items-center justify-center gap-2 text-center active:scale-98"
+          >
+            <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center text-emerald-400">
+              <ScanLine className="w-5 h-5" />
+            </div>
+            <span>ESCANEAR</span>
+          </button>
+
+          {/* Action 3: Stock */}
+          <button
+            onClick={() => onNavigate('stock')}
+            className="p-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-extrabold text-xs shadow-md transition-all flex flex-col items-center justify-center gap-2 text-center active:scale-98"
+          >
+            <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center text-white">
+              <Boxes className="w-5 h-5" />
+            </div>
+            <span>MÓDULO STOCK</span>
+          </button>
+
+          {/* Action 4: Clientes */}
+          <button
+            onClick={() => onNavigate('customers')}
+            className="p-4 bg-teal-700 hover:bg-teal-600 text-white rounded-2xl font-extrabold text-xs shadow-md transition-all flex flex-col items-center justify-center gap-2 text-center active:scale-98"
+          >
+            <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center text-white">
+              <Users className="w-5 h-5" />
+            </div>
+            <span>CLIENTES / FIADO</span>
+          </button>
+        </div>
+      </div>
+
+      {/* GRID SECTION: ALERTS & RECENT SALES */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        {/* 2.3 SECCIÓN DE ESTADO / ALERTAS */}
+        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-4 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-500" />
+                <h3 className="text-sm font-extrabold text-slate-900">Alertas de Stock Bajo / Cero</h3>
+              </div>
               <button
                 onClick={() => onNavigate('stock')}
-                className="bg-indigo-600 hover:bg-indigo-500 p-3 rounded-2xl flex items-center justify-center gap-2 cursor-pointer transition-colors text-white font-bold border border-indigo-400 col-span-2 sm:col-span-4 mb-1 shadow-md"
+                className="text-[11px] font-bold text-indigo-600 hover:underline flex items-center gap-1"
               >
-                <Boxes className="w-5 h-5 text-indigo-100" />
-                <span className="text-xs font-black">📦 STOCK (CARGA E INGRESO)</span>
-              </button>
-
-              <button
-                onClick={() => onNavigate('scan')}
-                className="bg-emerald-900/80 hover:bg-emerald-800 p-2.5 rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-colors border border-emerald-800/60"
-              >
-                <ScanLine className="w-4 h-4 mb-1 text-emerald-300" />
-                <span className="text-[11px] font-bold text-white">Escáner</span>
-              </button>
-
-              <button
-                onClick={() => onNavigate('customers')}
-                className="bg-emerald-900/80 hover:bg-emerald-800 p-2.5 rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-colors border border-emerald-800/60"
-              >
-                <Users className="w-4 h-4 mb-1 text-emerald-300" />
-                <span className="text-[11px] font-bold text-white">Clientes</span>
-              </button>
-
-              <button
-                onClick={() => onNavigate('list')}
-                className="bg-emerald-900/80 hover:bg-emerald-800 p-2.5 rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-colors border border-emerald-800/60"
-              >
-                <Package className="w-4 h-4 mb-1 text-emerald-300" />
-                <span className="text-[11px] font-bold text-white">Catálogo</span>
-              </button>
-
-              <button
-                onClick={() => onNavigate('search')}
-                className="bg-emerald-900/80 hover:bg-emerald-800 p-2.5 rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-colors border border-emerald-800/60"
-              >
-                <Search className="w-4 h-4 mb-1 text-emerald-300" />
-                <span className="text-[11px] font-bold text-white">Buscar</span>
+                Reponer <ArrowRight className="w-3 h-3" />
               </button>
             </div>
+
+            {lowStockProducts.length === 0 ? (
+              <div className="p-6 text-center bg-emerald-50/50 border border-emerald-100 rounded-2xl text-emerald-800 space-y-1">
+                <CheckCircle2 className="w-8 h-8 text-emerald-600 mx-auto" />
+                <p className="text-xs font-bold">¡Inventario Excelente!</p>
+                <p className="text-[11px] text-emerald-700/80">No tenés productos con faltante o stock crítico.</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {lowStockProducts.map((p) => {
+                  const qty = p.stockQuantity || 0;
+                  const isZero = qty === 0;
+
+                  return (
+                    <div
+                      key={p.id}
+                      onClick={() => onSelectProduct(p)}
+                      className="p-3 bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-2xl flex items-center justify-between cursor-pointer transition-colors"
+                    >
+                      <div className="truncate pr-2">
+                        <h4 className="text-xs font-bold text-slate-900 truncate">{p.name}</h4>
+                        <p className="text-[11px] text-slate-500">{p.brand} • EAN: {p.barcode}</p>
+                      </div>
+
+                      <span
+                        className={`text-xs font-mono font-bold px-2.5 py-1 rounded-xl border shrink-0 ${
+                          isZero
+                            ? 'bg-rose-100 text-rose-800 border-rose-200'
+                            : 'bg-amber-100 text-amber-800 border-amber-200'
+                        }`}
+                      >
+                        {qty === 0 ? 'Sin Stock (0)' : `${qty} un.`}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
-          <div className="mt-4 pt-3 border-t border-emerald-900 text-[10px] text-emerald-300/70 font-mono text-center">
-            PWA OFF-LINE READY
+          <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+            <span>Usa la carga rápida para actualizar las estanterías</span>
+            <button
+              onClick={onManualAdd}
+              className="text-xs font-bold text-slate-800 hover:text-emerald-700 flex items-center gap-1"
+            >
+              <Plus className="w-3.5 h-3.5" /> Nuevo Producto
+            </button>
           </div>
         </div>
 
-        {/* 8. Architecture & Scalability Bento Info Card */}
-        <div 
-          onClick={() => onNavigate('stock')}
-          className="col-span-12 md:col-span-4 bento-card justify-between border-slate-200 hover:border-indigo-300 cursor-pointer group"
-        >
+        {/* 2.4 ÚLTIMAS VENTAS REGISTRADAS */}
+        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-4 flex flex-col justify-between">
           <div>
-            <div className="flex items-center gap-2 font-bold text-slate-900 text-sm mb-1">
-              <Boxes className="w-4 h-4 text-indigo-600" />
-              Módulo de Stock e Inventario
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Receipt className="w-4 h-4 text-emerald-600" />
+                <h3 className="text-sm font-extrabold text-slate-900">Ventas Recientes</h3>
+              </div>
+              <button
+                onClick={() => onNavigate('sales')}
+                className="text-[11px] font-bold text-emerald-600 hover:underline flex items-center gap-1"
+              >
+                Nueva Venta <ArrowRight className="w-3 h-3" />
+              </button>
             </div>
-            <p className="text-xs text-slate-500 leading-relaxed mt-2">
-              Gestión completa: Carga individual (ajuste por escaneo) y Nuevo ingreso de mercadería con proveedores e historial de costos.
-            </p>
+
+            {recentSales.length === 0 ? (
+              <div className="p-6 text-center bg-slate-50 border border-slate-200 rounded-2xl text-slate-500 space-y-1">
+                <Clock className="w-8 h-8 text-slate-300 mx-auto" />
+                <p className="text-xs font-semibold">No hay ventas registradas aún.</p>
+                <p className="text-[11px] text-slate-400">Iniciá una venta en el carrito para comenzar.</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {recentSales.slice(0, 5).map((sale) => (
+                  <div
+                    key={sale.id}
+                    className="p-3 bg-slate-50 border border-slate-200 rounded-2xl flex items-center justify-between text-xs"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold text-slate-900">
+                          ${sale.totalAmount.toLocaleString('es-AR')}
+                        </span>
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-md uppercase ${
+                            sale.paymentMethod === 'credit'
+                              ? 'bg-amber-100 text-amber-800'
+                              : sale.paymentMethod === 'mercado_pago'
+                              ? 'bg-sky-100 text-sky-800'
+                              : 'bg-emerald-100 text-emerald-800'
+                          }`}
+                        >
+                          {sale.paymentMethod === 'credit'
+                            ? `Fiado (${sale.customerName || 'Cliente'})`
+                            : sale.paymentMethod === 'mercado_pago'
+                            ? 'MP'
+                            : 'Efectivo'}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        {new Date(sale.createdAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })} • {sale.totalItemsCount} {sale.totalItemsCount === 1 ? 'item' : 'items'}
+                      </p>
+                    </div>
+
+                    <span className="text-[11px] font-mono text-slate-400">
+                      #{sale.id.slice(-4)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
-          <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-            <span className="text-slate-400 font-medium">Acceso directo</span>
-            <span className="px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-full font-extrabold text-[10px] flex items-center gap-1 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-              Ir a Stock <ArrowRight className="w-3 h-3" />
-            </span>
+          <div className="pt-3 border-t border-slate-100 text-right">
+            <button
+              onClick={() => onNavigate('sales')}
+              className="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center justify-end gap-1"
+            >
+              Ir al Carrito de Ventas <ChevronRight className="w-4 h-4" />
+            </button>
           </div>
         </div>
-
       </div>
     </div>
   );
 };
-

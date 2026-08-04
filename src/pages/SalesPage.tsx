@@ -8,6 +8,7 @@ import { customerService } from '../services/firebase/customerService';
 import { accountService } from '../services/firebase/accountService';
 import { BarcodeScanner } from '../components/scanner/BarcodeScanner';
 import { CustomerFormModal } from '../components/customer/CustomerFormModal';
+import { NumericInput } from '../components/common/NumericInput';
 import { playScanSound } from '../utils/audio';
 import { 
   ShoppingCart, 
@@ -539,12 +540,12 @@ export const SalesPage: React.FC<SalesPageProps> = ({
                           >
                             <Minus className="w-3.5 h-3.5" />
                           </button>
-                          <input
-                            type="number"
+                          <NumericInput
                             min="1"
                             max={item.product.stockQuantity || 1}
+                            allowDecimal={false}
                             value={item.quantity}
-                            onChange={(e) => handleUpdateQuantity(item.product.id, parseInt(e.target.value, 10) || 1)}
+                            onChangeValue={(val) => handleUpdateQuantity(item.product.id, val || 1)}
                             className="w-12 h-8 bg-white text-center font-mono font-bold text-xs text-slate-900 focus:outline-none border-x border-slate-200"
                           />
                           <button
@@ -561,13 +562,13 @@ export const SalesPage: React.FC<SalesPageProps> = ({
                       <div className="flex items-center justify-between sm:justify-end gap-3">
                         <div className="flex items-center gap-1.5">
                           <span className="text-[10px] font-bold uppercase text-slate-400">Precio ($):</span>
-                          <input
-                            type="number"
+                          <NumericInput
                             min="0"
                             step="any"
+                            allowDecimal={true}
                             value={item.unitPrice === 0 ? '' : item.unitPrice}
                             placeholder="0"
-                            onChange={(e) => handleUpdateUnitPrice(item.product.id, e.target.value)}
+                            onChangeRaw={(e) => handleUpdateUnitPrice(item.product.id, e.target.value)}
                             className="w-20 h-8 px-2 bg-slate-50 border border-slate-300 rounded-xl text-center font-mono font-bold text-xs text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
                           />
                         </div>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Product, StockOperation } from '../../types/product';
 import { productService } from '../../services/firebase/productService';
+import { NumericInput } from '../common/NumericInput';
 import { Plus, Minus, Equal, CheckCircle2, AlertCircle, Save, Layers } from 'lucide-react';
 import { playScanSound } from '../../utils/audio';
 
@@ -202,11 +203,11 @@ export const StockManager: React.FC<StockManagerProps> = ({
               -
             </button>
 
-            <input
-              type="number"
+            <NumericInput
               min="0"
+              allowDecimal={false}
               value={amountInput}
-              onChange={(e) => setAmountInput(e.target.value)}
+              onChangeRaw={(e) => setAmountInput(e.target.value)}
               className={`flex-1 h-12 px-4 bg-slate-50 border rounded-2xl text-center text-xl font-mono font-bold focus:bg-white focus:outline-none transition-colors ${
                 isNegative ? 'border-rose-400 text-rose-600' : 'border-slate-300 text-slate-900 focus:border-emerald-500'
               }`}
