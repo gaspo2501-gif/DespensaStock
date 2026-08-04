@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { NavigationTab, Product } from '../types/product';
-import { ScanLine, Search, Package, PlusCircle, ShieldCheck, Layers, ArrowRight, Barcode, Database, CheckCircle2, ShoppingCart, Users } from 'lucide-react';
+import { ScanLine, Search, Package, PlusCircle, ShieldCheck, Layers, ArrowRight, Barcode, Database, CheckCircle2, ShoppingCart, Users, Boxes } from 'lucide-react';
 import { ProductCard } from '../components/product/ProductCard';
 
 interface HomeProps {
@@ -259,10 +259,18 @@ export const Home: React.FC<HomeProps> = ({
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <button
                 onClick={() => onNavigate('sales')}
-                className="bg-emerald-500 hover:bg-emerald-400 p-2.5 rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-colors text-slate-950 font-bold border border-emerald-400 col-span-2 sm:col-span-4 mb-1"
+                className="bg-emerald-500 hover:bg-emerald-400 p-3 rounded-2xl flex items-center justify-center gap-2 cursor-pointer transition-colors text-slate-950 font-bold border border-emerald-400 col-span-2 sm:col-span-4 mb-0.5"
               >
-                <ShoppingCart className="w-5 h-5 mb-1 text-slate-950" />
+                <ShoppingCart className="w-5 h-5 text-slate-950" />
                 <span className="text-xs font-black">NUEVA VENTA (CARRITO)</span>
+              </button>
+
+              <button
+                onClick={() => onNavigate('stock')}
+                className="bg-indigo-600 hover:bg-indigo-500 p-3 rounded-2xl flex items-center justify-center gap-2 cursor-pointer transition-colors text-white font-bold border border-indigo-400 col-span-2 sm:col-span-4 mb-1 shadow-md"
+              >
+                <Boxes className="w-5 h-5 text-indigo-100" />
+                <span className="text-xs font-black">📦 STOCK (CARGA E INGRESO)</span>
               </button>
 
               <button
@@ -305,21 +313,24 @@ export const Home: React.FC<HomeProps> = ({
         </div>
 
         {/* 8. Architecture & Scalability Bento Info Card */}
-        <div className="col-span-12 md:col-span-4 bento-card justify-between border-slate-200">
+        <div 
+          onClick={() => onNavigate('stock')}
+          className="col-span-12 md:col-span-4 bento-card justify-between border-slate-200 hover:border-indigo-300 cursor-pointer group"
+        >
           <div>
             <div className="flex items-center gap-2 font-bold text-slate-900 text-sm mb-1">
-              <Layers className="w-4 h-4 text-emerald-600" />
-              Gestión de Stock Activa
+              <Boxes className="w-4 h-4 text-indigo-600" />
+              Módulo de Stock e Inventario
             </div>
             <p className="text-xs text-slate-500 leading-relaxed mt-2">
-              Inventario físico en tiempo real habilitado. Permite sumar, restar y establecer stock durante el escaneo o catálogo, previniendo valores negativos.
+              Gestión completa: Carga individual (ajuste por escaneo) y Nuevo ingreso de mercadería con proveedores e historial de costos.
             </p>
           </div>
 
           <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-            <span className="text-slate-400 font-medium">Módulo de Stock</span>
-            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full font-bold text-[10px]">
-              ACTIVO
+            <span className="text-slate-400 font-medium">Acceso directo</span>
+            <span className="px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-full font-extrabold text-[10px] flex items-center gap-1 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+              Ir a Stock <ArrowRight className="w-3 h-3" />
             </span>
           </div>
         </div>

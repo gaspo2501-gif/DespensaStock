@@ -3,6 +3,7 @@ import { BarcodeScanner } from '../components/scanner/BarcodeScanner';
 import { ProductCard } from '../components/product/ProductCard';
 import { ProductForm } from '../components/product/ProductForm';
 import { StockManager } from '../components/product/StockManager';
+import { PurchaseEntry } from '../components/stock/PurchaseEntry';
 import { productService } from '../services/firebase/productService';
 import { getProductByBarcodeExternal } from '../services/externalApi/productApiService';
 import { Product, CreateProductInput } from '../types/product';
@@ -17,14 +18,20 @@ import {
   Save, 
   Edit3, 
   ArrowLeft,
-  Barcode
+  Barcode,
+  Truck,
+  Box
 } from 'lucide-react';
 import { playScanSound } from '../utils/audio';
 
 interface ScanPageProps {
+  products?: Product[];
+  onProductsUpdated?: (updatedProducts: Product[]) => void;
   onProductSaved: (product: Product) => void;
   onBackToHome: () => void;
 }
+
+type StockMode = 'single' | 'purchase';
 
 type ScanStage = 
   | 'scanning'
@@ -36,9 +43,12 @@ type ScanStage =
   | 'manual_form';
 
 export const ScanPage: React.FC<ScanPageProps> = ({
+  products = [],
+  onProductsUpdated = () => {},
   onProductSaved,
   onBackToHome,
 }) => {
+  const [stockMode, setStockMode] = useState<StockMode>('single');
   const [stage, setStage] = useState<ScanStage>('scanning');
   const [scannedBarcode, setScannedBarcode] = useState<string>('');
   
@@ -142,8 +152,8 @@ export const ScanPage: React.FC<ScanPageProps> = ({
   };
 
   return (
-    <div className="space-y-6 pb-20 animate-fadeIn max-w-lg mx-auto">
-      {/* Top Header */}
+    <div className="space-y-6 pb-20 animate-fadeIn max-w-xl mx-auto">
+      {/* Top Navigation Header */}
       <div className="flex items-center justify-between">
         <button
           onClick={onBackToHome}
@@ -155,10 +165,10 @@ export const ScanPage: React.FC<ScanPageProps> = ({
 
         <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
           <ScanLine className="w-5 h-5 text-emerald-600" />
-          Escáner de Productos
+          Gestión de Stock
         </h2>
 
-        {stage !== 'scanning' && (
+        {stockMode === 'single' && stage !== 'scanning' ? (
           <button
             onClick={resetScan}
             className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-full flex items-center gap-1 shadow-xs transition-colors"
@@ -166,10 +176,49 @@ export const ScanPage: React.FC<ScanPageProps> = ({
             <RefreshCw className="w-3.5 h-3.5" />
             Escanear
           </button>
+        ) : (
+          <div className="w-16"></div>
         )}
       </div>
 
-      {/* 1. SCANNING ACTIVE STAGE */}
+      {/* Mode Switcher Tabs */}
+      <div className="bg-slate-200 p-1 rounded-2xl flex gap-1 text-xs font-bold">
+        <button
+          onClick={() => setStockMode('single')}
+          className={`flex-1 py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-2 ${
+            stockMode === 'single'
+              ? 'bg-white text-slate-900 shadow-xs'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <Box className="w-4 h-4 text-emerald-600" />
+          Carga Individual
+        </button>
+
+        <button
+          onClick={() => setStockMode('purchase')}
+          className={`flex-1 py-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-2 ${
+            stockMode === 'purchase'
+              ? 'bg-white text-slate-900 shadow-xs'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <Truck className="w-4 h-4 text-indigo-600" />
+          Ingreso de Mercadería
+        </button>
+      </div>
+
+      {/* RENDER MODE B: NUEVO INGRESO DE MERCADERÍA */}
+      {stockMode === 'purchase' ? (
+        <PurchaseEntry
+          products={products}
+          onProductsUpdated={onProductsUpdated}
+          onBackToHome={onBackToHome}
+        />
+      ) : (
+        /* RENDER MODE A: CARGA INDIVIDUAL / AJUSTE DE STOCK (EXISTING SCAN WORKFLOW) */
+        <>
+          {/* 1. SCANNING ACTIVE STAGE */}
       {stage === 'scanning' && (
         <div className="space-y-4">
           <BarcodeScanner
@@ -384,6 +433,8 @@ export const ScanPage: React.FC<ScanPageProps> = ({
           onSubmit={handleManualFormSubmit}
           onCancel={resetScan}
         />
+      )}
+        </>
       )}
     </div>
   );

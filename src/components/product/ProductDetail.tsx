@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Product } from '../../types/product';
+import { PurchaseItem } from '../../types/purchase';
+import { purchaseService } from '../../services/firebase/purchaseService';
 import { StockManager } from './StockManager';
 import { 
   Barcode, 
@@ -13,7 +15,11 @@ import {
   ArrowLeft,
   AlertTriangle,
   Info,
-  CheckCircle2
+  CheckCircle2,
+  Truck,
+  TrendingDown,
+  History,
+  DollarSign
 } from 'lucide-react';
 import { getCategoryBadgeColor } from '../../utils/categories';
 
@@ -40,12 +46,34 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   const [isDeleting, setIsDeleting] = useState(false);
   const [showUpdatedBanner, setShowUpdatedBanner] = useState(false);
 
+  // Cost history state
+  const [historyItems, setHistoryItems] = useState<PurchaseItem[]>([]);
+  const [lastPurchase, setLastPurchase] = useState<PurchaseItem | null>(null);
+  const [bestCost, setBestCost] = useState<PurchaseItem | null>(null);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
   useEffect(() => {
     setProduct(initialProduct);
-    // If updated date is different from created date or updated recently, show success banner briefly
     if (initialProduct.updatedAt && initialProduct.updatedAt !== initialProduct.createdAt) {
       setShowUpdatedBanner(true);
     }
+
+    // Fetch cost history
+    const fetchHistory = async () => {
+      setLoadingHistory(true);
+      try {
+        const res = await purchaseService.getCostHistoryForProduct(initialProduct.id);
+        setHistoryItems(res.items);
+        setLastPurchase(res.lastPurchase);
+        setBestCost(res.bestCost);
+      } catch (err) {
+        console.warn('Error fetching cost history:', err);
+      } finally {
+        setLoadingHistory(false);
+      }
+    };
+
+    fetchHistory();
   }, [initialProduct]);
 
   const handleStockUpdated = (updated: Product) => {
@@ -193,6 +221,85 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
             onStockUpdated={handleStockUpdated}
             onScanNext={onScanAnother}
           />
+
+          {/* COST HISTORY & SUPPLIERS SECTION */}
+          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                <Truck className="w-4 h-4 text-indigo-600" />
+                Historial de Costos y Proveedores
+              </h4>
+              {historyItems.length > 0 && (
+                <span className="text-[10px] font-mono font-bold text-slate-500">
+                  {historyItems.length} {historyItems.length === 1 ? 'compra' : 'compras'}
+                </span>
+              )}
+            </div>
+
+            {loadingHistory ? (
+              <p className="text-xs text-slate-400 py-2">Cargando historial de compras...</p>
+            ) : historyItems.length === 0 ? (
+              <div className="p-3 bg-white rounded-xl border border-slate-200 text-xs text-slate-500 space-y-1">
+                <p className="font-semibold text-slate-700">Sin compras registradas aún</p>
+                <p className="text-[11px] text-slate-400">
+                  {product.currentCost || product.costPrice ? (
+                    <>Costo de referencia: <span className="font-mono font-bold text-slate-800">${product.currentCost || product.costPrice}</span></>
+                  ) : (
+                    'Los registros se crearán automáticamente al ingresar mercadería con un proveedor.'
+                  )}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2.5 text-xs">
+                {/* Last Purchase Card */}
+                {lastPurchase && (
+                  <div className="p-3 bg-white rounded-xl border border-indigo-200/80 shadow-2xs space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase text-indigo-700 tracking-wider">Última Compra</span>
+                      <span className="font-mono font-bold text-slate-900 text-sm">${lastPurchase.unitCost}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-slate-600 text-[11px]">
+                      <span className="font-semibold text-slate-800">🏢 {lastPurchase.providerName}</span>
+                      <span>{new Date(lastPurchase.purchaseDate).toLocaleDateString('es-AR')}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Best Recorded Cost Badge Card */}
+                {bestCost && (
+                  <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200/90 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase text-emerald-800 tracking-wider flex items-center gap-1">
+                        <TrendingDown className="w-3.5 h-3.5 text-emerald-600" />
+                        Mejor Costo Registrado
+                      </span>
+                      <span className="font-mono font-extrabold text-emerald-800 text-sm">${bestCost.unitCost}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-emerald-900 text-[11px]">
+                      <span className="font-bold">🏆 {bestCost.providerName}</span>
+                      <span>{new Date(bestCost.purchaseDate).toLocaleDateString('es-AR')}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* History Timeline List */}
+                <div className="pt-1 space-y-1.5 max-h-40 overflow-y-auto">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Historial Completo:</span>
+                  {historyItems.map((item, idx) => (
+                    <div key={item.id || idx} className="p-2.5 bg-white rounded-lg border border-slate-100 flex items-center justify-between text-[11px]">
+                      <div>
+                        <span className="font-bold text-slate-800">{item.providerName}</span>
+                        <p className="text-slate-400 text-[10px]">
+                          {item.quantity} un. • {new Date(item.purchaseDate).toLocaleDateString('es-AR')}
+                        </p>
+                      </div>
+                      <span className="font-mono font-bold text-slate-900">${item.unitCost}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Description Section */}
           {product.description && (

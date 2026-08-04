@@ -17,8 +17,13 @@ export interface Product {
   stockQuantity: number;
   minStockAlert?: number;
   costPrice?: number;
+  currentCost?: number;
+  lastCost?: number;
   salePrice?: number;
   supplierId?: string;
+  lastPurchaseDate?: string;
+  lastSupplierId?: string;
+  lastSupplierName?: string;
 }
 
 export type CreateProductInput = Omit<Product, 'id' | 'createdAt' | 'updatedAt' | 'stockQuantity'> & {
@@ -40,7 +45,7 @@ export interface ExternalProductResult {
   error?: string;
 }
 
-export type NavigationTab = 'home' | 'scan' | 'search' | 'list' | 'sales' | 'customers';
+export type NavigationTab = 'home' | 'scan' | 'search' | 'list' | 'sales' | 'customers' | 'stock';
 
 // Extensibility interfaces for future versions (V2 Stock, V3 Sales, V4 Suppliers, V5 Metrics)
 export interface StockMovement {

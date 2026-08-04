@@ -5,6 +5,7 @@ import { Navbar } from './components/layout/Navbar';
 import { BottomNav } from './components/layout/BottomNav';
 import { Home } from './pages/Home';
 import { ScanPage } from './pages/ScanPage';
+import { StockPage } from './pages/StockPage';
 import { SearchPage } from './pages/SearchPage';
 import { ProductListPage } from './pages/ProductListPage';
 import { SalesPage } from './pages/SalesPage';
@@ -138,6 +139,17 @@ export default function App() {
 
             {currentTab === 'scan' && (
               <ScanPage
+                products={products}
+                onProductsUpdated={handleProductsBatchUpdated}
+                onProductSaved={handleProductSaved}
+                onBackToHome={() => setCurrentTab('home')}
+              />
+            )}
+
+            {currentTab === 'stock' && (
+              <StockPage
+                products={products}
+                onProductsUpdated={handleProductsBatchUpdated}
                 onProductSaved={handleProductSaved}
                 onBackToHome={() => setCurrentTab('home')}
               />

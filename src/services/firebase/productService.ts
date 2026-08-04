@@ -68,6 +68,12 @@ export const productService = {
           source: data.source || 'local',
           stockQuantity: data.stockQuantity ?? data.stock ?? 0,
           salePrice: data.salePrice ?? data.price ?? undefined,
+          costPrice: data.costPrice ?? data.currentCost ?? data.lastCost ?? undefined,
+          currentCost: data.currentCost ?? data.lastCost ?? data.costPrice ?? undefined,
+          lastCost: data.lastCost ?? data.currentCost ?? data.costPrice ?? undefined,
+          lastPurchaseDate: data.lastPurchaseDate?.toDate ? data.lastPurchaseDate.toDate().toISOString() : (data.lastPurchaseDate || undefined),
+          lastSupplierId: data.lastSupplierId || undefined,
+          lastSupplierName: data.lastSupplierName || undefined,
         };
       }
     } catch (error) {
@@ -105,6 +111,12 @@ export const productService = {
           source: data.source || 'local',
           stockQuantity: data.stockQuantity ?? data.stock ?? 0,
           salePrice: data.salePrice ?? data.price ?? undefined,
+          costPrice: data.costPrice ?? data.currentCost ?? data.lastCost ?? undefined,
+          currentCost: data.currentCost ?? data.lastCost ?? data.costPrice ?? undefined,
+          lastCost: data.lastCost ?? data.currentCost ?? data.costPrice ?? undefined,
+          lastPurchaseDate: data.lastPurchaseDate?.toDate ? data.lastPurchaseDate.toDate().toISOString() : (data.lastPurchaseDate || undefined),
+          lastSupplierId: data.lastSupplierId || undefined,
+          lastSupplierName: data.lastSupplierName || undefined,
         });
       });
 
