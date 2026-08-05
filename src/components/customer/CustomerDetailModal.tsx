@@ -67,8 +67,12 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
     loadData();
   }, [loadData]);
 
-  const handleRegisterPaymentSubmit = async (amount: number, notes?: string) => {
-    await accountService.registerPayment(customer.id, amount, notes);
+  const handleRegisterPaymentSubmit = async (
+    amount: number, 
+    notes?: string, 
+    paymentMethod: 'cash' | 'mercado_pago' | 'transfer' | 'other' = 'cash'
+  ) => {
+    await accountService.registerPayment(customer.id, amount, notes, paymentMethod);
     setShowPaymentModal(false);
     await loadData();
   };

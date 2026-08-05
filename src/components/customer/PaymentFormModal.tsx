@@ -6,7 +6,7 @@ import { DollarSign, FileText, X, Check, Loader2, AlertCircle } from 'lucide-rea
 interface PaymentFormModalProps {
   customer: Customer;
   pendingDebt: number;
-  onSubmit: (amount: number, notes?: string) => Promise<void>;
+  onSubmit: (amount: number, notes?: string, paymentMethod?: 'cash' | 'mercado_pago' | 'transfer' | 'other') => Promise<void>;
   onCancel: () => void;
 }
 
@@ -17,6 +17,7 @@ export const PaymentFormModal: React.FC<PaymentFormModalProps> = ({
   onCancel,
 }) => {
   const [amountStr, setAmountStr] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'mercado_pago' | 'transfer' | 'other'>('cash');
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,7 +39,7 @@ export const PaymentFormModal: React.FC<PaymentFormModalProps> = ({
 
     setIsSubmitting(true);
     try {
-      await onSubmit(amount, notes.trim());
+      await onSubmit(amount, notes.trim(), paymentMethod);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Error al registrar el pago.');
     } finally {
@@ -115,6 +116,23 @@ export const PaymentFormModal: React.FC<PaymentFormModalProps> = ({
                 className="w-full pl-8 pr-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-mono text-base font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
               />
             </div>
+          </div>
+
+          {/* Forma de Pago */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+              Forma de Pago <span className="text-rose-500">*</span>
+            </label>
+            <select
+              value={paymentMethod}
+              onChange={(e) => setPaymentMethod(e.target.value as any)}
+              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+            >
+              <option value="cash">Efectivo</option>
+              <option value="mercado_pago">Mercado Pago</option>
+              <option value="transfer">Transferencia</option>
+              <option value="other">Otro</option>
+            </select>
           </div>
 
           {/* Observaciones */}

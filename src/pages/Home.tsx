@@ -20,7 +20,8 @@ import {
   CheckCircle2, 
   Clock,
   ExternalLink,
-  ChevronRight
+  ChevronRight,
+  Wallet
 } from 'lucide-react';
 
 interface HomeProps {
@@ -202,7 +203,7 @@ export const Home: React.FC<HomeProps> = ({
           Operaciones Frecuentes
         </h2>
 
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
           {/* Action 1: Nueva Venta */}
           <button
             onClick={() => onNavigate('sales')}
@@ -225,7 +226,18 @@ export const Home: React.FC<HomeProps> = ({
             <span>ESCANEAR</span>
           </button>
 
-          {/* Action 3: Stock */}
+          {/* Action 3: Caja */}
+          <button
+            onClick={() => onNavigate('cash')}
+            className="p-3.5 bg-emerald-800 hover:bg-emerald-700 text-white rounded-2xl font-extrabold text-xs shadow-md transition-all flex flex-col items-center justify-center gap-2 text-center active:scale-98"
+          >
+            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center text-emerald-300">
+              <Wallet className="w-5 h-5" />
+            </div>
+            <span>CAJA</span>
+          </button>
+
+          {/* Action 4: Stock */}
           <button
             onClick={() => onNavigate('stock')}
             className="p-3.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-extrabold text-xs shadow-md transition-all flex flex-col items-center justify-center gap-2 text-center active:scale-98"
@@ -236,7 +248,7 @@ export const Home: React.FC<HomeProps> = ({
             <span>STOCK</span>
           </button>
 
-          {/* Action 4: Gastos */}
+          {/* Action 5: Gastos */}
           <button
             onClick={() => onNavigate('expenses')}
             className="p-3.5 bg-rose-600 hover:bg-rose-500 text-white rounded-2xl font-extrabold text-xs shadow-md transition-all flex flex-col items-center justify-center gap-2 text-center active:scale-98"
@@ -247,7 +259,7 @@ export const Home: React.FC<HomeProps> = ({
             <span>GASTOS</span>
           </button>
 
-          {/* Action 5: Clientes */}
+          {/* Action 6: Clientes */}
           <button
             onClick={() => onNavigate('customers')}
             className="p-3.5 bg-teal-700 hover:bg-teal-600 text-white rounded-2xl font-extrabold text-xs shadow-md transition-all flex flex-col items-center justify-center gap-2 text-center active:scale-98"

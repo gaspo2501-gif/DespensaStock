@@ -11,6 +11,7 @@ import { ProductListPage } from './pages/ProductListPage';
 import { SalesPage } from './pages/SalesPage';
 import { CustomersPage } from './pages/CustomersPage';
 import { ExpensesPage } from './pages/ExpensesPage';
+import { CashPage } from './pages/CashPage';
 import { ProductDetail } from './components/product/ProductDetail';
 import { ProductForm } from './components/product/ProductForm';
 import { Loader2, AlertCircle, RefreshCw } from 'lucide-react';
@@ -192,6 +193,10 @@ export default function App() {
               <ExpensesPage
                 onBackToHome={() => setCurrentTab('home')}
               />
+            )}
+
+            {currentTab === 'cash' && (
+              <CashPage />
             )}
           </>
         )}

@@ -207,7 +207,8 @@ export const accountService = {
   async registerPayment(
     customerId: string, 
     amount: number, 
-    notes?: string
+    notes?: string,
+    paymentMethod: 'cash' | 'mercado_pago' | 'transfer' | 'other' = 'cash'
   ): Promise<AccountMovement> {
     if (amount <= 0) {
       throw new Error('El importe del pago debe ser mayor a cero.');
@@ -223,7 +224,7 @@ export const accountService = {
     const nowIso = new Date().toISOString();
     const movementId = `mov_pay_${Date.now()}`;
 
-    const newMov: AccountMovement = {
+    const newMov: AccountMovement & { paymentMethod?: string } = {
       id: movementId,
       customerId,
       type: 'PAYMENT',
@@ -231,6 +232,7 @@ export const accountService = {
       createdAt: nowIso,
       description: 'Pago a cuenta',
       notes,
+      paymentMethod,
     };
 
     const firestorePayload: Record<string, any> = {
@@ -238,6 +240,7 @@ export const accountService = {
       customerId,
       type: 'PAYMENT',
       amount,
+      paymentMethod,
       description: newMov.description,
       createdAtIso: nowIso,
       createdAt: serverTimestamp(),
@@ -252,9 +255,9 @@ export const accountService = {
     }
 
     const local = getLocalMovements();
-    local.unshift(newMov);
+    local.unshift(newMov as AccountMovement);
     saveLocalMovements(local);
 
-    return newMov;
+    return newMov as AccountMovement;
   },
 };
