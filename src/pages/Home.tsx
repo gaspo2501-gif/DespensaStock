@@ -202,13 +202,13 @@ export const Home: React.FC<HomeProps> = ({
           Operaciones Frecuentes
         </h2>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           {/* Action 1: Nueva Venta */}
           <button
             onClick={() => onNavigate('sales')}
-            className="p-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-extrabold text-xs shadow-md transition-all flex flex-col items-center justify-center gap-2 text-center active:scale-98"
+            className="p-3.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-extrabold text-xs shadow-md transition-all flex flex-col items-center justify-center gap-2 text-center active:scale-98"
           >
-            <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center text-white">
+            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center text-white">
               <ShoppingCart className="w-5 h-5" />
             </div>
             <span>NUEVA VENTA</span>
@@ -217,9 +217,9 @@ export const Home: React.FC<HomeProps> = ({
           {/* Action 2: Escáner */}
           <button
             onClick={() => onNavigate('scan')}
-            className="p-4 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-extrabold text-xs shadow-md transition-all flex flex-col items-center justify-center gap-2 text-center active:scale-98"
+            className="p-3.5 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-extrabold text-xs shadow-md transition-all flex flex-col items-center justify-center gap-2 text-center active:scale-98"
           >
-            <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center text-emerald-400">
+            <div className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center text-emerald-400">
               <ScanLine className="w-5 h-5" />
             </div>
             <span>ESCANEAR</span>
@@ -228,23 +228,34 @@ export const Home: React.FC<HomeProps> = ({
           {/* Action 3: Stock */}
           <button
             onClick={() => onNavigate('stock')}
-            className="p-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-extrabold text-xs shadow-md transition-all flex flex-col items-center justify-center gap-2 text-center active:scale-98"
+            className="p-3.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-extrabold text-xs shadow-md transition-all flex flex-col items-center justify-center gap-2 text-center active:scale-98"
           >
-            <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center text-white">
+            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center text-white">
               <Boxes className="w-5 h-5" />
             </div>
-            <span>MÓDULO STOCK</span>
+            <span>STOCK</span>
           </button>
 
-          {/* Action 4: Clientes */}
+          {/* Action 4: Gastos */}
+          <button
+            onClick={() => onNavigate('expenses')}
+            className="p-3.5 bg-rose-600 hover:bg-rose-500 text-white rounded-2xl font-extrabold text-xs shadow-md transition-all flex flex-col items-center justify-center gap-2 text-center active:scale-98"
+          >
+            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center text-white">
+              <Receipt className="w-5 h-5" />
+            </div>
+            <span>GASTOS</span>
+          </button>
+
+          {/* Action 5: Clientes */}
           <button
             onClick={() => onNavigate('customers')}
-            className="p-4 bg-teal-700 hover:bg-teal-600 text-white rounded-2xl font-extrabold text-xs shadow-md transition-all flex flex-col items-center justify-center gap-2 text-center active:scale-98"
+            className="p-3.5 bg-teal-700 hover:bg-teal-600 text-white rounded-2xl font-extrabold text-xs shadow-md transition-all flex flex-col items-center justify-center gap-2 text-center active:scale-98"
           >
-            <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center text-white">
+            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center text-white">
               <Users className="w-5 h-5" />
             </div>
-            <span>CLIENTES / FIADO</span>
+            <span>CLIENTES</span>
           </button>
         </div>
       </div>

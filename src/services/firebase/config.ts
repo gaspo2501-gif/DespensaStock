@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
-import { getFirestore, Firestore } from 'firebase/firestore';
+import { initializeFirestore, getFirestore, Firestore } from 'firebase/firestore';
 
 interface FirebaseConfig {
   apiKey: string;
@@ -33,7 +33,16 @@ const dbId = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatab
   ? firebaseConfig.firestoreDatabaseId 
   : undefined;
 
-const db: Firestore = dbId ? getFirestore(app, dbId) : getFirestore(app);
+let db: Firestore;
+try {
+  db = initializeFirestore(app, {
+    experimentalAutoDetectLongPolling: true,
+  }, dbId || '(default)');
+} catch (e) {
+  console.warn('initializeFirestore fallback to getFirestore:', e);
+  db = dbId ? getFirestore(app, dbId) : getFirestore(app);
+}
 
 export { app, db, firebaseConfig };
+
 
