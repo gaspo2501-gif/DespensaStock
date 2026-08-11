@@ -21,7 +21,8 @@ import {
   Clock,
   ExternalLink,
   ChevronRight,
-  Wallet
+  Wallet,
+  BarChart3
 } from 'lucide-react';
 
 interface HomeProps {
@@ -203,14 +204,14 @@ export const Home: React.FC<HomeProps> = ({
           Operaciones Frecuentes
         </h2>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-7 gap-2.5">
           {/* Action 1: Nueva Venta */}
           <button
             onClick={() => onNavigate('sales')}
-            className="p-3.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-extrabold text-xs shadow-md transition-all flex flex-col items-center justify-center gap-2 text-center active:scale-98"
+            className="p-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-extrabold text-[11px] shadow-md transition-all flex flex-col items-center justify-center gap-1.5 text-center active:scale-98"
           >
-            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center text-white">
-              <ShoppingCart className="w-5 h-5" />
+            <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center text-white">
+              <ShoppingCart className="w-4 h-4" />
             </div>
             <span>NUEVA VENTA</span>
           </button>
@@ -218,10 +219,10 @@ export const Home: React.FC<HomeProps> = ({
           {/* Action 2: Escáner */}
           <button
             onClick={() => onNavigate('scan')}
-            className="p-3.5 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-extrabold text-xs shadow-md transition-all flex flex-col items-center justify-center gap-2 text-center active:scale-98"
+            className="p-3 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-extrabold text-[11px] shadow-md transition-all flex flex-col items-center justify-center gap-1.5 text-center active:scale-98"
           >
-            <div className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center text-emerald-400">
-              <ScanLine className="w-5 h-5" />
+            <div className="w-8 h-8 rounded-xl bg-white/10 flex items-center justify-center text-emerald-400">
+              <ScanLine className="w-4 h-4" />
             </div>
             <span>ESCANEAR</span>
           </button>
@@ -229,43 +230,54 @@ export const Home: React.FC<HomeProps> = ({
           {/* Action 3: Caja */}
           <button
             onClick={() => onNavigate('cash')}
-            className="p-3.5 bg-emerald-800 hover:bg-emerald-700 text-white rounded-2xl font-extrabold text-xs shadow-md transition-all flex flex-col items-center justify-center gap-2 text-center active:scale-98"
+            className="p-3 bg-emerald-800 hover:bg-emerald-700 text-white rounded-2xl font-extrabold text-[11px] shadow-md transition-all flex flex-col items-center justify-center gap-1.5 text-center active:scale-98"
           >
-            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center text-emerald-300">
-              <Wallet className="w-5 h-5" />
+            <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center text-emerald-300">
+              <Wallet className="w-4 h-4" />
             </div>
             <span>CAJA</span>
           </button>
 
-          {/* Action 4: Stock */}
+          {/* Action 4: Reportes */}
+          <button
+            onClick={() => onNavigate('reports')}
+            className="p-3 bg-cyan-700 hover:bg-cyan-600 text-white rounded-2xl font-extrabold text-[11px] shadow-md transition-all flex flex-col items-center justify-center gap-1.5 text-center active:scale-98"
+          >
+            <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center text-cyan-200">
+              <BarChart3 className="w-4 h-4" />
+            </div>
+            <span>REPORTES</span>
+          </button>
+
+          {/* Action 5: Stock */}
           <button
             onClick={() => onNavigate('stock')}
-            className="p-3.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-extrabold text-xs shadow-md transition-all flex flex-col items-center justify-center gap-2 text-center active:scale-98"
+            className="p-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-extrabold text-[11px] shadow-md transition-all flex flex-col items-center justify-center gap-1.5 text-center active:scale-98"
           >
-            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center text-white">
-              <Boxes className="w-5 h-5" />
+            <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center text-white">
+              <Boxes className="w-4 h-4" />
             </div>
             <span>STOCK</span>
           </button>
 
-          {/* Action 5: Gastos */}
+          {/* Action 6: Gastos */}
           <button
             onClick={() => onNavigate('expenses')}
-            className="p-3.5 bg-rose-600 hover:bg-rose-500 text-white rounded-2xl font-extrabold text-xs shadow-md transition-all flex flex-col items-center justify-center gap-2 text-center active:scale-98"
+            className="p-3 bg-rose-600 hover:bg-rose-500 text-white rounded-2xl font-extrabold text-[11px] shadow-md transition-all flex flex-col items-center justify-center gap-1.5 text-center active:scale-98"
           >
-            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center text-white">
-              <Receipt className="w-5 h-5" />
+            <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center text-white">
+              <Receipt className="w-4 h-4" />
             </div>
             <span>GASTOS</span>
           </button>
 
-          {/* Action 6: Clientes */}
+          {/* Action 7: Clientes */}
           <button
             onClick={() => onNavigate('customers')}
-            className="p-3.5 bg-teal-700 hover:bg-teal-600 text-white rounded-2xl font-extrabold text-xs shadow-md transition-all flex flex-col items-center justify-center gap-2 text-center active:scale-98"
+            className="p-3 bg-teal-700 hover:bg-teal-600 text-white rounded-2xl font-extrabold text-[11px] shadow-md transition-all flex flex-col items-center justify-center gap-1.5 text-center active:scale-98"
           >
-            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center text-white">
-              <Users className="w-5 h-5" />
+            <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center text-white">
+              <Users className="w-4 h-4" />
             </div>
             <span>CLIENTES</span>
           </button>

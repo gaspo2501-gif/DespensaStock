@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavigationTab } from '../../types/product';
-import { Home, Package, Users, ShoppingCart, Boxes, Receipt, Wallet } from 'lucide-react';
+import { Home, Package, Users, ShoppingCart, Boxes, Receipt, Wallet, BarChart3 } from 'lucide-react';
 
 interface BottomNavProps {
   currentTab: NavigationTab;
@@ -10,7 +10,7 @@ interface BottomNavProps {
 export const BottomNav: React.FC<BottomNavProps> = ({ currentTab, onSelectTab }) => {
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/80 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] px-1 py-1.5">
-      <div className="max-w-lg mx-auto flex items-center justify-between text-center overflow-x-auto no-scrollbar">
+      <div className="max-w-xl mx-auto flex items-center justify-between text-center overflow-x-auto no-scrollbar gap-1">
         {/* Home Tab */}
         <button
           onClick={() => onSelectTab('home')}
@@ -42,6 +42,17 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentTab, onSelectTab })
         >
           <Wallet className={`w-5 h-5 ${currentTab === 'cash' ? 'stroke-[2.5]' : ''}`} />
           <span className="text-[10px]">Caja</span>
+        </button>
+
+        {/* Reportes Tab */}
+        <button
+          onClick={() => onSelectTab('reports')}
+          className={`flex flex-col items-center gap-1 transition-colors py-1 px-1.5 shrink-0 ${
+            currentTab === 'reports' ? 'text-emerald-700 font-bold' : 'text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <BarChart3 className={`w-5 h-5 ${currentTab === 'reports' ? 'stroke-[2.5]' : ''}`} />
+          <span className="text-[10px]">Reportes</span>
         </button>
 
         {/* Stock Tab */}
