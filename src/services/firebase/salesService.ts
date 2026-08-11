@@ -9,9 +9,11 @@ import {
 } from 'firebase/firestore';
 import { db } from './config';
 import { CartItem, SaleRecord, SaleItemRecord, PaymentMethod } from '../../types/sale';
-import { Product } from '../../types/product';
+import { Product, getProductStock } from '../../types/product';
+import { LocationSelection, getLocationName } from '../../types/location';
 import { productService } from './productService';
 import { accountService } from './accountService';
+import { cashService } from './cashService';
 
 const SALES_COLLECTION = 'sales';
 const PRODUCTS_COLLECTION = 'products';
@@ -38,14 +40,16 @@ function saveLocalSales(sales: SaleRecord[]) {
 export const salesService = {
   /**
    * Process and confirm a sale transaction atomically in Firestore.
-   * Validates stock for all items, creates the sale record, deducts product stock safely,
+   * Validates stock for all items at target location, creates sale record with locationId,
+   * deducts product stock for target location safely, registers cash movement,
    * and registers customer debt if payment method is 'credit' (fiado).
    */
   async processSale(
     cartItems: CartItem[], 
     paymentMethod: PaymentMethod = 'cash', 
     customerId?: string, 
-    customerName?: string
+    customerName?: string,
+    locationId: string = 'aimogasta'
   ): Promise<{ sale: SaleRecord; updatedProducts: Product[] }> {
     if (!cartItems || cartItems.length === 0) {
       throw new Error('El carrito de ventas está vacío.');
@@ -55,14 +59,17 @@ export const salesService = {
       throw new Error('Seleccioná o creá un cliente para continuar.');
     }
 
-    // 1. Pre-validation on client side
+    const targetLocationKey = locationId === 'olascoaga' ? 'olascoaga' : 'aimogasta';
+
+    // 1. Pre-validation on client side per location
     for (const item of cartItems) {
       if (item.quantity <= 0) {
         throw new Error(`La cantidad para '${item.product.name}' debe ser al menos 1.`);
       }
-      if (item.quantity > (item.product.stockQuantity || 0)) {
+      const locStock = getProductStock(item.product, targetLocationKey);
+      if (item.quantity > locStock) {
         throw new Error(
-          `Stock insuficiente para '${item.product.name}'. Disponible: ${item.product.stockQuantity || 0} unidades, Solicitado: ${item.quantity}.`
+          `Stock insuficiente para '${item.product.name}' en ${getLocationName(targetLocationKey)}. Disponible: ${locStock} unidades, Solicitado: ${item.quantity}.`
         );
       }
     }
@@ -93,6 +100,7 @@ export const salesService = {
       paymentMethod,
       customerId: customerId || undefined,
       customerName: customerName || undefined,
+      locationId: targetLocationKey,
     };
 
     let transactionSucceeded = false;
@@ -100,7 +108,7 @@ export const salesService = {
     // 2. Execute atomic Firestore transaction
     try {
       await runTransaction(db, async (transaction) => {
-        // Step A: Read all product docs to verify current stock in database
+        // Step A: Read all product docs to verify current stock in target location
         const productReads: { ref: ReturnType<typeof doc>; data: any; item: CartItem }[] = [];
 
         for (const item of cartItems) {
@@ -112,36 +120,53 @@ export const salesService = {
           }
 
           const data = productSnap.data();
-          const currentStock = data.stockQuantity ?? data.stock ?? 0;
+          const legacyStock = data.stockQuantity ?? data.stock ?? 0;
+          const stockByLoc = data.stockByLocation && typeof data.stockByLocation === 'object'
+            ? { ...data.stockByLocation }
+            : { aimogasta: legacyStock, olascoaga: 0 };
+
+          const currentStock = stockByLoc[targetLocationKey] ?? (targetLocationKey === 'aimogasta' ? legacyStock : 0);
 
           if (currentStock < item.quantity) {
             throw new Error(
-              `Stock insuficiente en base de datos para '${item.product.name}'. Disponible: ${currentStock}, Solicitado: ${item.quantity}.`
+              `Stock insuficiente en base de datos para '${item.product.name}' en ${getLocationName(targetLocationKey)}. Disponible: ${currentStock}, Solicitado: ${item.quantity}.`
             );
           }
 
           productReads.push({ ref: productRef, data, item });
         }
 
-        // Step B: Write stock deductions
+        // Step B: Write stock deductions for target location
         for (const { ref, data, item } of productReads) {
-          const currentStock = data.stockQuantity ?? data.stock ?? 0;
-          const newStock = currentStock - item.quantity;
+          const legacyStock = data.stockQuantity ?? data.stock ?? 0;
+          const stockByLoc = data.stockByLocation && typeof data.stockByLocation === 'object'
+            ? { ...data.stockByLocation }
+            : { aimogasta: legacyStock, olascoaga: 0 };
+
+          const currentStock = stockByLoc[targetLocationKey] ?? (targetLocationKey === 'aimogasta' ? legacyStock : 0);
+          stockByLoc[targetLocationKey] = currentStock - item.quantity;
+
+          const newTotalStock = (Object.values(stockByLoc) as any[]).reduce<number>(
+            (s, q) => s + (typeof q === 'number' && !isNaN(q) ? q : 0),
+            0
+          );
 
           transaction.update(ref, {
-            stockQuantity: newStock,
-            stock: newStock,
+            stockByLocation: stockByLoc,
+            stockQuantity: newTotalStock,
+            stock: newTotalStock,
             updatedAt: serverTimestamp(),
           });
 
           updatedProducts.push({
             ...item.product,
-            stockQuantity: newStock,
+            stockByLocation: stockByLoc,
+            stockQuantity: newTotalStock,
             updatedAt: nowIso,
           });
         }
 
-        // Step C: Write sale record document
+        // Step C: Write sale record document with locationId
         const saleRef = doc(db, SALES_COLLECTION, saleId);
         const salePayload: Record<string, any> = {
           id: saleId,
@@ -151,6 +176,7 @@ export const salesService = {
           totalAmount,
           totalItemsCount,
           paymentMethod,
+          locationId: targetLocationKey,
         };
         if (customerId) salePayload.customerId = customerId;
         if (customerName) salePayload.customerName = customerName;
@@ -168,6 +194,7 @@ export const salesService = {
             amount: totalAmount,
             description: 'Venta fiada',
             saleId,
+            locationId: targetLocationKey,
             createdAtIso: nowIso,
             createdAt: serverTimestamp(),
           });
@@ -186,12 +213,31 @@ export const salesService = {
     if (!transactionSucceeded || updatedProducts.length === 0) {
       updatedProducts.length = 0; // reset
       for (const item of cartItems) {
-        const updated = await productService.updateStock(item.product.id, 'subtract', item.quantity);
+        const updated = await productService.updateStock(item.product.id, 'subtract', item.quantity, targetLocationKey);
         updatedProducts.push(updated);
       }
 
       if (paymentMethod === 'credit' && customerId) {
-        await accountService.registerDebt(customerId, totalAmount, 'Venta fiada', saleId);
+        await accountService.registerDebt(customerId, totalAmount, 'Venta fiada', saleId, targetLocationKey);
+      }
+    }
+
+    // Auto-register cash movement for cash/mercado_pago/transfer sales
+    if (paymentMethod !== 'credit') {
+      try {
+        const pm = paymentMethod === 'mercado_pago' ? 'mercado_pago' : 'cash';
+        await cashService.registerMovement({
+          type: 'INCOME',
+          amount: totalAmount,
+          paymentMethod: pm,
+          description: `Venta #${saleId.slice(-6)} (${getLocationName(targetLocationKey)})`,
+          date: nowIso.split('T')[0],
+          sourceType: 'SALE',
+          sourceId: saleId,
+          locationId: targetLocationKey,
+        });
+      } catch (err) {
+        console.warn('Failed auto cash registration for sale:', err);
       }
     }
 
@@ -207,9 +253,9 @@ export const salesService = {
   },
 
   /**
-   * Fetch historical sales records from Firestore
+   * Fetch historical sales records from Firestore, filtered optionally by locationId
    */
-  async getRecentSales(): Promise<SaleRecord[]> {
+  async getRecentSales(locationId?: LocationSelection): Promise<SaleRecord[]> {
     try {
       const q = query(collection(db, SALES_COLLECTION), orderBy('createdAt', 'desc'));
       const snapshot = await getDocs(q);
@@ -217,23 +263,31 @@ export const salesService = {
 
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
-        sales.push({
-          id: docSnap.id,
-          createdAt: data.createdAtIso || (data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString()),
-          items: data.items || [],
-          totalAmount: data.totalAmount || 0,
-          totalItemsCount: data.totalItemsCount || 0,
-          paymentMethod: data.paymentMethod || 'cash',
-          customerId: data.customerId || undefined,
-          customerName: data.customerName || undefined,
-        });
+        const saleLocation = data.locationId || 'aimogasta'; // default legacy sales to aimogasta
+
+        if (!locationId || locationId === 'all' || saleLocation === locationId) {
+          sales.push({
+            id: docSnap.id,
+            createdAt: data.createdAtIso || (data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString()),
+            items: data.items || [],
+            totalAmount: data.totalAmount || 0,
+            totalItemsCount: data.totalItemsCount || 0,
+            paymentMethod: data.paymentMethod || 'cash',
+            customerId: data.customerId || undefined,
+            customerName: data.customerName || undefined,
+            locationId: saleLocation,
+          });
+        }
       });
 
       saveLocalSales(sales);
       return sales;
     } catch (err) {
       console.warn('Error al obtener ventas de Firestore, usando cache local:', err);
-      return getLocalSales();
+      const local = getLocalSales();
+      if (!locationId || locationId === 'all') return local;
+      return local.filter(s => (s.locationId || 'aimogasta') === locationId);
     }
   },
 };
+

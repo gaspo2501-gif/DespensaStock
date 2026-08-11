@@ -11,6 +11,8 @@ import { BarcodeScanner } from '../scanner/BarcodeScanner';
 import { ProductForm } from '../product/ProductForm';
 import { NumericInput } from '../common/NumericInput';
 import { playScanSound } from '../../utils/audio';
+import { useLocation } from '../../context/LocationContext';
+import { getLocationName } from '../../types/location';
 import { 
   Truck, 
   ScanLine, 
@@ -30,7 +32,8 @@ import {
   Loader2,
   DollarSign,
   Package,
-  Barcode
+  Barcode,
+  Building2
 } from 'lucide-react';
 
 interface PurchaseEntryProps {
@@ -44,6 +47,8 @@ export const PurchaseEntry: React.FC<PurchaseEntryProps> = ({
   onProductsUpdated,
   onBackToHome,
 }) => {
+  const { activeLocation } = useLocation();
+
   // Provider state
   const [selectedProvider, setSelectedProvider] = useState<Provider | null>(null);
   const [showProviderModal, setShowProviderModal] = useState<boolean>(false);
@@ -255,6 +260,7 @@ export const PurchaseEntry: React.FC<PurchaseEntryProps> = ({
         providerId: selectedProvider.id,
         providerName: selectedProvider.name,
         items: draftItems,
+        locationId: activeLocation,
       });
 
       playScanSound('success');

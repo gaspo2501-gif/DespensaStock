@@ -29,4 +29,5 @@ export interface SaleRecord {
   paymentMethod?: PaymentMethod;
   customerId?: string;
   customerName?: string;
+  locationId?: string;
 }

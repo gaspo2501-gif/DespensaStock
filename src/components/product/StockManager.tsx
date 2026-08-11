@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Product, StockOperation } from '../../types/product';
+import { Product, StockOperation, getStockForLocation } from '../../types/product';
 import { productService } from '../../services/firebase/productService';
 import { NumericInput } from '../common/NumericInput';
-import { Plus, Minus, Equal, CheckCircle2, AlertCircle, Save, Layers } from 'lucide-react';
+import { Plus, Minus, Equal, CheckCircle2, AlertCircle, Save, Layers, Building2 } from 'lucide-react';
 import { playScanSound } from '../../utils/audio';
+import { useLocation } from '../../context/LocationContext';
+import { getLocationName } from '../../types/location';
 
 interface StockManagerProps {
   product: Product;
@@ -18,13 +20,14 @@ export const StockManager: React.FC<StockManagerProps> = ({
   onScanNext,
   className = '',
 }) => {
+  const { activeLocation } = useLocation();
   const [operation, setOperation] = useState<StockOperation>('add');
   const [amountInput, setAmountInput] = useState<string>('1');
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  const currentStock = product.stockQuantity ?? 0;
+  const currentStock = getStockForLocation(product, activeLocation);
   const numAmount = parseInt(amountInput, 10);
   const validAmount = isNaN(numAmount) || numAmount < 0 ? 0 : numAmount;
 
@@ -75,10 +78,11 @@ export const StockManager: React.FC<StockManagerProps> = ({
     setLoading(true);
 
     try {
-      const updated = await productService.updateStock(product.id, operation, numAmount);
+      const updated = await productService.updateStock(product.id, operation, numAmount, activeLocation);
       onStockUpdated(updated);
       playScanSound('success');
-      setSuccessMessage(`¡Stock actualizado a ${updated.stockQuantity} unidades!`);
+      const locStock = getStockForLocation(updated, activeLocation);
+      setSuccessMessage(`¡Stock en ${getLocationName(activeLocation)} actualizado a ${locStock} unidades!`);
       // Reset input for potential next action
       setAmountInput('1');
     } catch (err: unknown) {
@@ -98,8 +102,11 @@ export const StockManager: React.FC<StockManagerProps> = ({
             <Layers className="w-5 h-5" />
           </div>
           <div>
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Gestión de Stock</span>
-            <h3 className="text-xs font-semibold text-slate-700">Inventario actual</h3>
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+              <Building2 className="w-3 h-3 text-emerald-600" />
+              {getLocationName(activeLocation)}
+            </span>
+            <h3 className="text-xs font-semibold text-slate-700">Inventario local</h3>
           </div>
         </div>
 

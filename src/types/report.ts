@@ -1,9 +1,21 @@
+import { LocationSelection } from './location';
+
 export type ReportPeriodOption = 'today' | 'yesterday' | 'last7days' | 'thisMonth' | 'lastMonth' | 'custom';
 
 export interface ReportFilter {
   period: ReportPeriodOption;
   fromDate?: string; // YYYY-MM-DD
   toDate?: string;   // YYYY-MM-DD
+  locationId?: LocationSelection;
+}
+
+export interface LocationComparisonStat {
+  metricKey: string;
+  metricLabel: string;
+  aimogastaValue: number;
+  olascoagaValue: number;
+  totalValue: number;
+  isCurrency?: boolean;
 }
 
 export interface ComparisonMetric {
@@ -152,4 +164,5 @@ export interface FullBusinessReport {
   cash: CashReportSummary;
   inventory: InventoryReportSummary;
   alerts: ReportAlert[];
+  locationComparison?: LocationComparisonStat[];
 }

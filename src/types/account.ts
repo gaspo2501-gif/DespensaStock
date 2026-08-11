@@ -8,6 +8,7 @@ export interface AccountMovement {
   createdAt: string; // ISO timestamp
   description: string;
   saleId?: string;
+  locationId?: string;
   notes?: string;
 }
 

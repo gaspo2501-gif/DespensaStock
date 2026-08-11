@@ -11,6 +11,7 @@ export interface PurchaseItem {
   providerId: string;
   providerName: string;
   purchaseId?: string;
+  locationId?: string;
   quantity: number;
   unitCost: number;
   totalCost: number;
@@ -26,6 +27,7 @@ export interface Purchase {
   id: string;
   providerId: string;
   providerName: string;
+  locationId?: string;
   createdAt: string; // ISO string
   totalAmount: number;
   totalItemsCount: number;
@@ -45,5 +47,6 @@ export interface ProcessPurchaseItemInput {
 export interface ProcessPurchaseInput {
   providerId: string;
   providerName: string;
+  locationId?: string;
   items: ProcessPurchaseItemInput[];
 }

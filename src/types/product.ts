@@ -14,7 +14,8 @@ export interface Product {
   updatedAt: string; // ISO string
   source: ProductSource;
   
-  stockQuantity: number;
+  stockQuantity: number; // Total stock across all locations
+  stockByLocation?: Record<string, number>; // Stock map per location ID (e.g. { aimogasta: 12, olascoaga: 5 })
   minStockAlert?: number;
   costPrice?: number;
   currentCost?: number;
@@ -28,7 +29,37 @@ export interface Product {
 
 export type CreateProductInput = Omit<Product, 'id' | 'createdAt' | 'updatedAt' | 'stockQuantity'> & {
   stockQuantity?: number;
+  stockByLocation?: Record<string, number>;
 };
+
+export function getProductStock(product: Product, locationId?: string): number {
+  if (!product) return 0;
+  if (!locationId || locationId === 'all') {
+    return getTotalStock(product);
+  }
+
+  if (product.stockByLocation && typeof product.stockByLocation[locationId] === 'number') {
+    return product.stockByLocation[locationId];
+  }
+
+  // Backward compatibility fallback for legacy documents without stockByLocation:
+  // Default legacy stock to 'aimogasta'
+  if (locationId === 'aimogasta') {
+    return product.stockQuantity ?? 0;
+  }
+  return 0;
+}
+
+export const getStockForLocation = getProductStock;
+
+export function getTotalStock(product: Product): number {
+  if (!product) return 0;
+  if (product.stockByLocation && Object.keys(product.stockByLocation).length > 0) {
+    return Object.values(product.stockByLocation).reduce((sum, qty) => sum + (typeof qty === 'number' && !isNaN(qty) ? qty : 0), 0);
+  }
+  return product.stockQuantity ?? 0;
+}
+
 
 export interface ExternalProductResult {
   found: boolean;

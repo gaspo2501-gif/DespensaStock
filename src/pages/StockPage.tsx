@@ -5,6 +5,7 @@ import { BarcodeScanner } from '../components/scanner/BarcodeScanner';
 import { ProductCard } from '../components/product/ProductCard';
 import { ProductForm } from '../components/product/ProductForm';
 import { StockManager } from '../components/product/StockManager';
+import { StockTransferModal } from '../components/stock/StockTransferModal';
 import { productService } from '../services/firebase/productService';
 import { providerService } from '../services/firebase/providerService';
 import { getProductByBarcodeExternal } from '../services/externalApi/productApiService';
@@ -33,7 +34,8 @@ import {
   Camera,
   ListFilter,
   SlidersHorizontal,
-  ChevronDown
+  ChevronDown,
+  ArrowLeftRight
 } from 'lucide-react';
 
 interface StockPageProps {
@@ -87,6 +89,9 @@ export const StockPage: React.FC<StockPageProps> = ({
 
   // Stock Adjustment Modal for All Products tab
   const [productForStockAdjust, setProductForStockAdjust] = useState<Product | null>(null);
+
+  // Stock Transfer Modal between locations
+  const [showTransferModal, setShowTransferModal] = useState<boolean>(false);
 
   // Providers list for filtering
   const [providersList, setProvidersList] = useState<{ id: string; name: string }[]>([]);
@@ -320,17 +325,26 @@ export const StockPage: React.FC<StockPageProps> = ({
           Gestión de Stock
         </h2>
 
-        {subMode === 'single' && stage !== 'scanning' ? (
+        <div className="flex items-center gap-2">
           <button
-            onClick={resetScan}
-            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-full flex items-center gap-1 shadow-xs transition-colors"
+            onClick={() => setShowTransferModal(true)}
+            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold rounded-full flex items-center gap-1.5 shadow-xs transition-colors"
+            title="Transferir stock entre Aimogasta y Olascoaga"
           >
-            <RefreshCw className="w-3.5 h-3.5" />
-            Reiniciar
+            <ArrowLeftRight className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Transferir</span>
           </button>
-        ) : (
-          <div className="w-16"></div>
-        )}
+
+          {subMode === 'single' && stage !== 'scanning' && (
+            <button
+              onClick={resetScan}
+              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-full flex items-center gap-1 shadow-xs transition-colors"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Reiniciar
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Main Mode Selection Header Tabs */}
@@ -915,6 +929,17 @@ export const StockPage: React.FC<StockPageProps> = ({
             />
           </div>
         </div>
+      )}
+
+      {/* STOCK TRANSFER MODAL */}
+      {showTransferModal && (
+        <StockTransferModal
+          products={products}
+          onClose={() => setShowTransferModal(false)}
+          onTransferSuccess={(updatedProducts) => {
+            onProductsUpdated(updatedProducts);
+          }}
+        />
       )}
     </div>
   );

@@ -13,10 +13,49 @@ import {
   Timestamp
 } from 'firebase/firestore';
 import { db } from './config';
-import { Product, CreateProductInput, StockOperation } from '../../types/product';
+import { Product, CreateProductInput, StockOperation, getTotalStock } from '../../types/product';
 
 const PRODUCTS_COLLECTION = 'products';
 const LOCAL_STORAGE_KEY = 'despensa_stock_local_products';
+
+function formatProductFromData(id: string, data: any): Product {
+  const legacyStock = data.stockQuantity ?? data.stock ?? 0;
+  const stockByLocation = data.stockByLocation && typeof data.stockByLocation === 'object'
+    ? { ...data.stockByLocation }
+    : { aimogasta: legacyStock, olascoaga: 0 };
+
+  // Ensure both official locations exist in map
+  if (typeof stockByLocation.aimogasta !== 'number') stockByLocation.aimogasta = legacyStock;
+  if (typeof stockByLocation.olascoaga !== 'number') stockByLocation.olascoaga = 0;
+
+  const calculatedTotal = (Object.values(stockByLocation) as any[]).reduce<number>(
+    (sum, q) => sum + (typeof q === 'number' && !isNaN(q) ? q : 0),
+    0
+  );
+
+  return {
+    id,
+    barcode: data.barcode,
+    name: data.name || 'Sin Nombre',
+    brand: data.brand || '',
+    category: data.category || 'Otros',
+    presentation: data.presentation || '',
+    description: data.description || '',
+    imageUrl: data.imageUrl || '',
+    createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : (data.createdAt || new Date().toISOString()),
+    updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : (data.updatedAt || new Date().toISOString()),
+    source: data.source || 'local',
+    stockQuantity: calculatedTotal,
+    stockByLocation,
+    salePrice: data.salePrice ?? data.price ?? undefined,
+    costPrice: data.costPrice ?? data.currentCost ?? data.lastCost ?? undefined,
+    currentCost: data.currentCost ?? data.lastCost ?? data.costPrice ?? undefined,
+    lastCost: data.lastCost ?? data.currentCost ?? data.costPrice ?? undefined,
+    lastPurchaseDate: data.lastPurchaseDate?.toDate ? data.lastPurchaseDate.toDate().toISOString() : (data.lastPurchaseDate || undefined),
+    lastSupplierId: data.lastSupplierId || undefined,
+    lastSupplierName: data.lastSupplierName || undefined,
+  };
+}
 
 // Helper for local storage backup synchronization
 function getLocalProducts(): Product[] {
@@ -53,28 +92,7 @@ export const productService = {
 
       if (!querySnapshot.empty) {
         const docSnap = querySnapshot.docs[0];
-        const data = docSnap.data();
-        return {
-          id: docSnap.id,
-          barcode: data.barcode,
-          name: data.name || 'Sin Nombre',
-          brand: data.brand || '',
-          category: data.category || 'Otros',
-          presentation: data.presentation || '',
-          description: data.description || '',
-          imageUrl: data.imageUrl || '',
-          createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : (data.createdAt || new Date().toISOString()),
-          updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : (data.updatedAt || new Date().toISOString()),
-          source: data.source || 'local',
-          stockQuantity: data.stockQuantity ?? data.stock ?? 0,
-          salePrice: data.salePrice ?? data.price ?? undefined,
-          costPrice: data.costPrice ?? data.currentCost ?? data.lastCost ?? undefined,
-          currentCost: data.currentCost ?? data.lastCost ?? data.costPrice ?? undefined,
-          lastCost: data.lastCost ?? data.currentCost ?? data.costPrice ?? undefined,
-          lastPurchaseDate: data.lastPurchaseDate?.toDate ? data.lastPurchaseDate.toDate().toISOString() : (data.lastPurchaseDate || undefined),
-          lastSupplierId: data.lastSupplierId || undefined,
-          lastSupplierName: data.lastSupplierName || undefined,
-        };
+        return formatProductFromData(docSnap.id, docSnap.data());
       }
     } catch (error) {
       console.warn('Firestore query error, trying local fallback:', error);
@@ -96,28 +114,7 @@ export const productService = {
       const products: Product[] = [];
 
       querySnapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        products.push({
-          id: docSnap.id,
-          barcode: data.barcode,
-          name: data.name || 'Sin Nombre',
-          brand: data.brand || '',
-          category: data.category || 'Otros',
-          presentation: data.presentation || '',
-          description: data.description || '',
-          imageUrl: data.imageUrl || '',
-          createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : (data.createdAt || new Date().toISOString()),
-          updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : (data.updatedAt || new Date().toISOString()),
-          source: data.source || 'local',
-          stockQuantity: data.stockQuantity ?? data.stock ?? 0,
-          salePrice: data.salePrice ?? data.price ?? undefined,
-          costPrice: data.costPrice ?? data.currentCost ?? data.lastCost ?? undefined,
-          currentCost: data.currentCost ?? data.lastCost ?? data.costPrice ?? undefined,
-          lastCost: data.lastCost ?? data.currentCost ?? data.costPrice ?? undefined,
-          lastPurchaseDate: data.lastPurchaseDate?.toDate ? data.lastPurchaseDate.toDate().toISOString() : (data.lastPurchaseDate || undefined),
-          lastSupplierId: data.lastSupplierId || undefined,
-          lastSupplierName: data.lastSupplierName || undefined,
-        });
+        products.push(formatProductFromData(docSnap.id, docSnap.data()));
       });
 
       // Merge and update local cache
@@ -135,7 +132,7 @@ export const productService = {
   /**
    * Save a new product in Firestore after verifying unique barcode
    */
-  async saveProduct(input: CreateProductInput): Promise<Product> {
+  async saveProduct(input: CreateProductInput, locationId: string = 'aimogasta'): Promise<Product> {
     const cleanedBarcode = input.barcode.trim();
     if (!cleanedBarcode) {
       throw new Error('El código de barras es obligatorio');
@@ -151,9 +148,14 @@ export const productService = {
     }
 
     const nowIso = new Date().toISOString();
-    // Generate document ID from barcode or auto timestamp
     const docId = `prod_${cleanedBarcode}_${Date.now()}`;
     const initialStock = typeof input.stockQuantity === 'number' && !isNaN(input.stockQuantity) && input.stockQuantity >= 0 ? input.stockQuantity : 0;
+
+    const initialStockMap: Record<string, number> = input.stockByLocation
+      ? { aimogasta: 0, olascoaga: 0, ...input.stockByLocation }
+      : { aimogasta: locationId === 'aimogasta' ? initialStock : 0, olascoaga: locationId === 'olascoaga' ? initialStock : 0 };
+
+    const totalStock = Object.values(initialStockMap).reduce((s, n) => s + (typeof n === 'number' && !isNaN(n) ? n : 0), 0);
 
     const newProduct: Product = {
       id: docId,
@@ -167,7 +169,8 @@ export const productService = {
       createdAt: nowIso,
       updatedAt: nowIso,
       source: input.source || 'manual',
-      stockQuantity: initialStock,
+      stockQuantity: totalStock,
+      stockByLocation: initialStockMap,
       salePrice: input.salePrice,
     };
 
@@ -182,8 +185,9 @@ export const productService = {
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       source: newProduct.source,
-      stockQuantity: initialStock,
-      stock: initialStock,
+      stockQuantity: totalStock,
+      stock: totalStock,
+      stockByLocation: initialStockMap,
     };
 
     if (typeof input.salePrice === 'number' && !isNaN(input.salePrice) && input.salePrice >= 0) {
@@ -206,9 +210,9 @@ export const productService = {
   },
 
   /**
-   * Update product stock safely (add, subtract, set)
+   * Update product stock safely per location (add, subtract, set)
    */
-  async updateStock(productId: string, operation: StockOperation, quantity: number): Promise<Product> {
+  async updateStock(productId: string, operation: StockOperation, quantity: number, locationId: string = 'aimogasta'): Promise<Product> {
     if (isNaN(quantity) || quantity < 0) {
       throw new Error('La cantidad ingresada debe ser un número válido mayor o igual a cero');
     }
@@ -219,21 +223,7 @@ export const productService = {
       const docRef = doc(db, PRODUCTS_COLLECTION, productId);
       const docSnap = await getDoc(docRef);
       if (docSnap.exists()) {
-        const data = docSnap.data();
-        currentProduct = {
-          id: docSnap.id,
-          barcode: data.barcode,
-          name: data.name || 'Sin Nombre',
-          brand: data.brand || '',
-          category: data.category || 'Otros',
-          presentation: data.presentation || '',
-          description: data.description || '',
-          imageUrl: data.imageUrl || '',
-          createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : (data.createdAt || new Date().toISOString()),
-          updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : (data.updatedAt || new Date().toISOString()),
-          source: data.source || 'local',
-          stockQuantity: data.stockQuantity ?? data.stock ?? 0,
-        };
+        currentProduct = formatProductFromData(docSnap.id, docSnap.data());
       }
     } catch (err) {
       console.warn('Error fetching product for stock update from Firestore:', err);
@@ -248,27 +238,41 @@ export const productService = {
       throw new Error('Producto no encontrado para actualizar el stock');
     }
 
-    const currentStock = currentProduct.stockQuantity || 0;
-    let newStock = currentStock;
+    const currentStockMap = {
+      aimogasta: 0,
+      olascoaga: 0,
+      ...(currentProduct.stockByLocation || { aimogasta: currentProduct.stockQuantity || 0, olascoaga: 0 }),
+    };
+
+    const targetLocationKey = locationId === 'olascoaga' ? 'olascoaga' : 'aimogasta';
+    const locationCurrentStock = currentStockMap[targetLocationKey] ?? 0;
+    let locationNewStock = locationCurrentStock;
 
     if (operation === 'add') {
-      newStock = currentStock + quantity;
+      locationNewStock = locationCurrentStock + quantity;
     } else if (operation === 'subtract') {
-      if (currentStock - quantity < 0) {
-        throw new Error(`No es posible restar ${quantity} unidades. El stock actual es ${currentStock} y no puede resultar negativo.`);
+      if (locationCurrentStock - quantity < 0) {
+        throw new Error(`No es posible restar ${quantity} unidades en ${targetLocationKey.toUpperCase()}. El stock actual en esa ubicación es ${locationCurrentStock}.`);
       }
-      newStock = currentStock - quantity;
+      locationNewStock = locationCurrentStock - quantity;
     } else if (operation === 'set') {
-      newStock = quantity;
+      locationNewStock = quantity;
     }
 
+    const updatedStockMap = {
+      ...currentStockMap,
+      [targetLocationKey]: locationNewStock,
+    };
+
+    const newTotalStock = Object.values(updatedStockMap).reduce((s, q) => s + (typeof q === 'number' && !isNaN(q) ? q : 0), 0);
     const nowIso = new Date().toISOString();
 
     try {
       const docRef = doc(db, PRODUCTS_COLLECTION, productId);
       await updateDoc(docRef, {
-        stockQuantity: newStock,
-        stock: newStock,
+        stockByLocation: updatedStockMap,
+        stockQuantity: newTotalStock,
+        stock: newTotalStock,
         updatedAt: serverTimestamp(),
       });
     } catch (error) {
@@ -277,7 +281,8 @@ export const productService = {
 
     const updatedProduct: Product = {
       ...currentProduct,
-      stockQuantity: newStock,
+      stockByLocation: updatedStockMap,
+      stockQuantity: newTotalStock,
       updatedAt: nowIso,
     };
 
@@ -347,6 +352,7 @@ export const productService = {
         updatedAt: nowIso,
         source: updates.source || 'manual',
         stockQuantity: updates.stockQuantity ?? 0,
+        stockByLocation: updates.stockByLocation || { aimogasta: updates.stockQuantity ?? 0, olascoaga: 0 },
         salePrice: updates.salePrice,
       };
     }
@@ -410,3 +416,4 @@ export const productService = {
     );
   }
 };
+

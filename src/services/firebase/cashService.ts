@@ -17,6 +17,7 @@ import {
   CashBalanceSummary, 
   CashPaymentMethod 
 } from '../../types/cash';
+import { LocationSelection } from '../../types/location';
 import { salesService } from './salesService';
 import { expenseService } from './expenseService';
 import { accountService } from './accountService';
@@ -64,7 +65,7 @@ export const cashService = {
   /**
    * Create a manual cash movement document in Firestore and local storage.
    */
-  async createCashMovement(input: CreateCashMovementInput): Promise<CashMovement> {
+  async createCashMovement(input: CreateCashMovementInput, locationId: string = 'aimogasta'): Promise<CashMovement> {
     if (!input.description || !input.description.trim()) {
       throw new Error('Debe ingresar un concepto o descripción para el movimiento.');
     }
@@ -72,6 +73,7 @@ export const cashService = {
       throw new Error('El importe debe ser un número mayor a cero.');
     }
 
+    const targetLocationKey = input.locationId || locationId || 'aimogasta';
     const nowIso = new Date().toISOString();
     const movementId = input.sourceId && input.sourceType !== 'MANUAL'
       ? `mov_cash_${input.sourceType.toLowerCase()}_${input.sourceId}`
@@ -86,6 +88,7 @@ export const cashService = {
       date: input.date || nowIso.split('T')[0],
       sourceType: input.sourceType || 'MANUAL',
       sourceId: input.sourceId || movementId,
+      locationId: targetLocationKey,
       notes: input.notes?.trim() || '',
       createdAt: nowIso,
     };
@@ -101,6 +104,7 @@ export const cashService = {
         date: newMovement.date,
         sourceType: newMovement.sourceType,
         sourceId: newMovement.sourceId,
+        locationId: targetLocationKey,
         notes: newMovement.notes,
         createdAtIso: nowIso,
         createdAt: serverTimestamp(),
@@ -120,10 +124,18 @@ export const cashService = {
   },
 
   /**
+   * Alias for createCashMovement
+   */
+  async registerMovement(input: CreateCashMovementInput, locationId: string = 'aimogasta'): Promise<CashMovement> {
+    return this.createCashMovement(input, locationId);
+  },
+
+  /**
    * Fetch all consolidated cash movements (combines manual movements, sales, expenses, and customer payments).
+   * Supports filtering by LocationSelection.
    * Ensures NO DUPLICATES using sourceType and sourceId.
    */
-  async getCashMovements(): Promise<CashMovement[]> {
+  async getCashMovements(locationId?: LocationSelection): Promise<CashMovement[]> {
     let manualAndSavedMovements: CashMovement[] = [];
 
     // 1. Fetch from Firestore cash_movements collection
@@ -138,24 +150,32 @@ export const cashService = {
           dateStr = data.createdAtIso.split('T')[0];
         }
 
-        manualAndSavedMovements.push({
-          id: docSnap.id,
-          type: data.type || 'INCOME',
-          amount: data.amount || 0,
-          paymentMethod: data.paymentMethod || 'cash',
-          description: data.description || '',
-          date: dateStr || new Date().toISOString().split('T')[0],
-          sourceType: data.sourceType || 'MANUAL',
-          sourceId: data.sourceId || docSnap.id,
-          notes: data.notes || '',
-          createdAt: data.createdAtIso || (data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString()),
-        });
+        const movLocation = data.locationId || 'aimogasta';
+
+        if (!locationId || locationId === 'all' || movLocation === locationId) {
+          manualAndSavedMovements.push({
+            id: docSnap.id,
+            type: data.type || 'INCOME',
+            amount: data.amount || 0,
+            paymentMethod: data.paymentMethod || 'cash',
+            description: data.description || '',
+            date: dateStr || new Date().toISOString().split('T')[0],
+            sourceType: data.sourceType || 'MANUAL',
+            sourceId: data.sourceId || docSnap.id,
+            locationId: movLocation,
+            notes: data.notes || '',
+            createdAt: data.createdAtIso || (data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString()),
+          });
+        }
       });
 
       saveLocalCashMovements(manualAndSavedMovements);
     } catch (err) {
       console.warn('Error al obtener movimientos de caja de Firestore, usando cache local:', err);
-      manualAndSavedMovements = getLocalCashMovements();
+      const local = getLocalCashMovements();
+      manualAndSavedMovements = (!locationId || locationId === 'all')
+        ? local
+        : local.filter(m => (m.locationId || 'aimogasta') === locationId);
     }
 
     // Map to keep track of existing movements by sourceType + sourceId
@@ -173,7 +193,7 @@ export const cashService = {
 
     // 2. Consolidate non-fiado Sales (paymentMethod !== 'credit')
     try {
-      const sales = await salesService.getRecentSales();
+      const sales = await salesService.getRecentSales(locationId);
       for (const sale of sales) {
         if (sale.paymentMethod === 'credit') continue; // Fiado sales do NOT generate cash income
 
@@ -189,6 +209,7 @@ export const cashService = {
             date: saleDateStr,
             sourceType: 'SALE',
             sourceId: sale.id,
+            locationId: sale.locationId || 'aimogasta',
             notes: `${sale.totalItemsCount} ítems`,
             createdAt: sale.createdAt || new Date().toISOString(),
           };
@@ -201,7 +222,7 @@ export const cashService = {
 
     // 3. Consolidate Expenses
     try {
-      const expenses = await expenseService.getExpenses();
+      const expenses = await expenseService.getExpenses(locationId);
       for (const exp of expenses) {
         const key = getSourceKey('EXPENSE', exp.id);
         if (!movementMap.has(key)) {
@@ -214,6 +235,7 @@ export const cashService = {
             date: exp.date,
             sourceType: 'EXPENSE',
             sourceId: exp.id,
+            locationId: exp.locationId || 'aimogasta',
             notes: exp.notes || '',
             createdAt: exp.createdAt || new Date().toISOString(),
           };
@@ -226,7 +248,7 @@ export const cashService = {
 
     // 4. Consolidate Customer Debt Payments (account_movements where type === 'PAYMENT')
     try {
-      const accountMovs = await accountService.getAllMovements();
+      const accountMovs = await accountService.getAllMovements(locationId);
       for (const accMov of accountMovs) {
         if (accMov.type !== 'PAYMENT') continue;
 
@@ -242,6 +264,7 @@ export const cashService = {
             date: payDateStr,
             sourceType: 'CUSTOMER_PAYMENT',
             sourceId: accMov.id,
+            locationId: accMov.locationId || 'aimogasta',
             notes: accMov.notes || '',
             createdAt: accMov.createdAt || new Date().toISOString(),
           };
@@ -272,7 +295,7 @@ export const cashService = {
   /**
    * Set initial cash balance by creating a special manual movement.
    */
-  async setInitialBalance(amount: number, date?: string, notes?: string): Promise<CashMovement> {
+  async setInitialBalance(amount: number, date?: string, notes?: string, locationId: string = 'aimogasta'): Promise<CashMovement> {
     return this.createCashMovement({
       type: 'INCOME',
       amount,
@@ -281,15 +304,16 @@ export const cashService = {
       date: date || new Date().toISOString().split('T')[0],
       sourceType: 'MANUAL',
       sourceId: `initial_${Date.now()}`,
+      locationId,
       notes: notes || 'Ajuste / Saldo de apertura inicial',
-    });
+    }, locationId);
   },
 
   /**
    * Calculate current balances by payment method (Cash, Mercado Pago, Transfer) & Today's Summary.
    */
-  async getCashSummary(): Promise<CashBalanceSummary> {
-    const movements = await this.getCashMovements();
+  async getCashSummary(locationId?: LocationSelection): Promise<CashBalanceSummary> {
+    const movements = await this.getCashMovements(locationId);
 
     const todayStr = new Date().toISOString().split('T')[0];
 
@@ -344,7 +368,8 @@ export const cashService = {
   async createCashClosure(
     expectedCash: number, 
     countedCash: number, 
-    notes?: string
+    notes?: string,
+    locationId: string = 'aimogasta'
   ): Promise<CashClosure> {
     const nowIso = new Date().toISOString();
     const closureId = `closure_${Date.now()}`;
@@ -356,6 +381,7 @@ export const cashService = {
       expectedCash,
       countedCash,
       difference,
+      locationId,
       notes: notes?.trim() || '',
       createdAt: nowIso,
     };
@@ -368,6 +394,7 @@ export const cashService = {
         expectedCash: newClosure.expectedCash,
         countedCash: newClosure.countedCash,
         difference: newClosure.difference,
+        locationId,
         notes: newClosure.notes,
         createdAtIso: nowIso,
         createdAt: serverTimestamp(),
@@ -386,7 +413,7 @@ export const cashService = {
   /**
    * Fetch past cash closures.
    */
-  async getCashClosures(): Promise<CashClosure[]> {
+  async getCashClosures(locationId?: LocationSelection): Promise<CashClosure[]> {
     try {
       const q = query(collection(db, CASH_CLOSURES_COLLECTION), orderBy('createdAt', 'desc'));
       const snapshot = await getDocs(q);
@@ -394,22 +421,28 @@ export const cashService = {
 
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
-        closures.push({
-          id: docSnap.id,
-          date: data.date || new Date().toISOString().split('T')[0],
-          expectedCash: data.expectedCash || 0,
-          countedCash: data.countedCash || 0,
-          difference: data.difference || 0,
-          notes: data.notes || '',
-          createdAt: data.createdAtIso || (data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString()),
-        });
+        const closureLoc = data.locationId || 'aimogasta';
+        if (!locationId || locationId === 'all' || closureLoc === locationId) {
+          closures.push({
+            id: docSnap.id,
+            date: data.date || new Date().toISOString().split('T')[0],
+            expectedCash: data.expectedCash || 0,
+            countedCash: data.countedCash || 0,
+            difference: data.difference || 0,
+            locationId: closureLoc,
+            notes: data.notes || '',
+            createdAt: data.createdAtIso || (data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString()),
+          });
+        }
       });
 
       saveLocalCashClosures(closures);
       return closures;
     } catch (err) {
       console.warn('Error al obtener cierres de caja de Firestore, usando cache local:', err);
-      return getLocalCashClosures();
+      const local = getLocalCashClosures();
+      if (!locationId || locationId === 'all') return local;
+      return local.filter(c => (c.locationId || 'aimogasta') === locationId);
     }
   },
 
@@ -428,3 +461,4 @@ export const cashService = {
     }
   }
 };
+

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Product } from '../types/product';
+import { Product, getProductStock } from '../types/product';
 import { CartItem, SaleRecord, PaymentMethod } from '../types/sale';
 import { Customer, CreateCustomerInput } from '../types/customer';
 import { productService } from '../services/firebase/productService';
@@ -11,6 +11,8 @@ import { CustomerFormModal } from '../components/customer/CustomerFormModal';
 import { ProductSearch } from '../components/sales/ProductSearch';
 import { NumericInput } from '../components/common/NumericInput';
 import { playScanSound } from '../utils/audio';
+import { useLocation } from '../context/LocationContext';
+import { getLocationName } from '../types/location';
 import { 
   ShoppingCart, 
   ScanLine, 
@@ -30,7 +32,8 @@ import {
   UserCheck,
   UserPlus,
   QrCode,
-  Banknote
+  Banknote,
+  MapPin
 } from 'lucide-react';
 
 interface SalesPageProps {
@@ -46,6 +49,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
   onNavigateToScan,
   onNavigateHome,
 }) => {
+  const { activeLocation } = useLocation();
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   
@@ -72,7 +76,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
     try {
       const [custList, balMap] = await Promise.all([
         customerService.getAllCustomers(),
-        accountService.getAllBalances(),
+        accountService.getAllBalances(activeLocation),
       ]);
       setCustomersList(custList);
       setCustomerBalances(balMap);
@@ -81,7 +85,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
     } finally {
       setLoadingCustomers(false);
     }
-  }, []);
+  }, [activeLocation]);
 
   useEffect(() => {
     if (paymentMethod === 'credit') {
@@ -101,18 +105,18 @@ export const SalesPage: React.FC<SalesPageProps> = ({
     });
   };
 
-  // Add product to cart logic
+  // Add product to cart logic using location-specific stock
   const handleAddProductToCart = (product: Product) => {
     clearFeedback();
 
-    const currentStock = product.stockQuantity || 0;
+    const currentStock = getProductStock(product, activeLocation);
 
-    // Rule: Out of stock
+    // Rule: Out of stock at active location
     if (currentStock <= 0) {
       playScanSound('error');
       setFeedback({
         type: 'error',
-        message: `El producto '${product.name}' no tiene stock disponible (Stock: 0).`,
+        message: `El producto '${product.name}' no tiene stock disponible en ${getLocationName(activeLocation)} (Stock: 0).`,
       });
       return;
     }
@@ -125,7 +129,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
       playScanSound('error');
       setFeedback({
         type: 'warning',
-        message: `Stock insuficiente para '${product.name}'. Disponible: ${currentStock} unidades, ya agregaste ${existingQty} al carrito.`,
+        message: `Stock insuficiente en ${getLocationName(activeLocation)} para '${product.name}'. Disponible: ${currentStock} u., ya agregaste ${existingQty} al carrito.`,
       });
       return;
     }
@@ -194,7 +198,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
       if (idx === -1) return prev;
 
       const item = prev[idx];
-      const maxStock = item.product.stockQuantity || 0;
+      const maxStock = getProductStock(item.product, activeLocation);
 
       if (newQty <= 0) {
         return prev.filter((i) => i.product.id !== productId);
@@ -203,7 +207,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
       if (newQty > maxStock) {
         setFeedback({
           type: 'warning',
-          message: `Stock insuficiente. El máximo disponible para '${item.product.name}' es de ${maxStock} unidades.`,
+          message: `Stock insuficiente en ${getLocationName(activeLocation)}. El máximo disponible para '${item.product.name}' es de ${maxStock} unidades.`,
         });
         playScanSound('error');
         return prev;
@@ -256,7 +260,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
   const totalAmount = cart.reduce((acc, curr) => acc + curr.subtotal, 0);
   const totalItemsCount = cart.reduce((acc, curr) => acc + curr.quantity, 0);
 
-  // Confirm Sale Execution
+  // Confirm Sale Execution with activeLocation
   const handleConfirmSale = async () => {
     if (cart.length === 0) return;
     clearFeedback();
@@ -278,7 +282,8 @@ export const SalesPage: React.FC<SalesPageProps> = ({
         cart,
         paymentMethod,
         selectedCustomer?.id,
-        selectedCustomer?.name
+        selectedCustomer?.name,
+        activeLocation
       );
       onProductsUpdated(result.updatedProducts);
       setCompletedSale(result.sale);
@@ -308,15 +313,23 @@ export const SalesPage: React.FC<SalesPageProps> = ({
 
   return (
     <div className="space-y-5 animate-fadeIn max-w-3xl mx-auto">
-      {/* Top Header */}
+      {/* Top Header with Active Point of Sale Indicator */}
       <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-2xs flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-md shadow-emerald-600/20">
             <ShoppingCart className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-lg font-black text-slate-900 tracking-tight">Nueva Venta</h1>
-            <p className="text-xs text-slate-500 font-medium">Escanea o agrega productos al carrito</p>
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-black text-slate-900 tracking-tight">Nueva Venta</h1>
+              <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full uppercase flex items-center gap-1 ${
+                activeLocation === 'aimogasta' ? 'bg-emerald-100 text-emerald-800' : 'bg-indigo-100 text-indigo-800'
+              }`}>
+                <MapPin className="w-3 h-3" />
+                {getLocationName(activeLocation)}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 font-medium">Punto de venta activo: {getLocationName(activeLocation)}</p>
           </div>
         </div>
 

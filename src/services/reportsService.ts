@@ -1,3 +1,4 @@
+import { LocationSelection } from '../types/location';
 import { 
   ReportFilter, 
   FullBusinessReport, 
@@ -20,7 +21,7 @@ import { cashService } from './firebase/cashService';
 import { purchaseService } from './firebase/purchaseService';
 import { providerService } from './firebase/providerService';
 import { SaleRecord } from '../types/sale';
-import { Product } from '../types/product';
+import { Product, getStockForLocation } from '../types/product';
 import { Expense } from '../types/expense';
 import { Purchase } from '../types/purchase';
 import { collection, getDocs, query, orderBy } from 'firebase/firestore';
@@ -118,30 +119,30 @@ export const reportsService = {
   /**
    * Main report consolidation engine. Fetches data once and computes metrics in memory.
    */
-  async generateFullReport(filter: ReportFilter): Promise<FullBusinessReport> {
+  async generateFullReport(filter: ReportFilter, locationId?: LocationSelection): Promise<FullBusinessReport> {
     const range = this.getPeriodRange(filter);
 
     // Fetch all collections in parallel for optimal response speed
     const [
-      allSales,
+      rawSales,
       allProducts,
       allCustomers,
       allCustomerMovements,
       customerBalances,
-      allExpenses,
-      allPurchases,
+      rawExpenses,
+      rawPurchases,
       allProviders,
       cashSummary
     ] = await Promise.all([
       salesService.getRecentSales().catch(() => []),
       productService.getAllProducts().catch(() => []),
       customerService.getAllCustomers().catch(() => []),
-      accountService.getAllMovements().catch(() => []),
-      accountService.getAllBalances().catch(() => ({} as Record<string, number>)),
-      expenseService.getExpenses().catch(() => []),
-      this.getPurchases().catch(() => []),
+      accountService.getAllMovements(locationId).catch(() => []),
+      accountService.getAllBalances(locationId).catch(() => ({} as Record<string, number>)),
+      expenseService.getExpenses(locationId).catch(() => []),
+      this.getPurchases(locationId).catch(() => []),
       providerService.getAllProviders().catch(() => []),
-      cashService.getCashSummary().catch(() => ({
+      cashService.getCashSummary(locationId).catch(() => ({
         cashBalance: 0,
         mercadoPagoBalance: 0,
         transferBalance: 0,
@@ -152,6 +153,19 @@ export const reportsService = {
         todayNet: 0
       }))
     ]);
+
+    // Filter by locationId if specified
+    const allSales = locationId
+      ? rawSales.filter((s: any) => !s.locationId || s.locationId === locationId)
+      : rawSales;
+
+    const allExpenses = locationId
+      ? rawExpenses.filter((e: any) => !e.locationId || e.locationId === locationId)
+      : rawExpenses;
+
+    const allPurchases = locationId
+      ? rawPurchases.filter((p: any) => !p.locationId || p.locationId === locationId)
+      : rawPurchases;
 
     // Product lookup map
     const productMap = new Map<string, Product>();
@@ -442,7 +456,7 @@ export const reportsService = {
     let lowStockCount = 0;
 
     allProducts.forEach(p => {
-      const qty = p.stockQuantity || 0;
+      const qty = locationId ? getStockForLocation(p, locationId) : (p.stockQuantity || 0);
       totalUnits += qty;
       if (qty <= 0) {
         outOfStockCount += 1;
@@ -569,17 +583,22 @@ export const reportsService = {
   /**
    * Helper to query raw purchases
    */
-  async getPurchases(): Promise<Purchase[]> {
+  async getPurchases(locationId?: LocationSelection): Promise<Purchase[]> {
     try {
       const q = query(collection(db, 'purchases'), orderBy('createdAt', 'desc'));
       const snapshot = await getDocs(q);
       const purchases: Purchase[] = [];
       snapshot.forEach(docSnap => {
         const data = docSnap.data();
+        const pLocation = data.locationId || 'aimogasta';
+        if (locationId && locationId !== 'all' && pLocation !== locationId) {
+          return;
+        }
         purchases.push({
           id: docSnap.id,
           providerId: data.providerId || '',
           providerName: data.providerName || 'Proveedor',
+          locationId: pLocation,
           createdAt: data.createdAtIso || (data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString()),
           totalAmount: data.totalAmount || 0,
           totalItemsCount: data.totalItemsCount || 0,

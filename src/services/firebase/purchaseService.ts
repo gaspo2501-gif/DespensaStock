@@ -13,7 +13,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './config';
 import { Purchase, PurchaseItem, ProcessPurchaseInput } from '../../types/purchase';
-import { Product } from '../../types/product';
+import { Product, getProductStock, getTotalStock } from '../../types/product';
 import { productService } from './productService';
 
 const PURCHASES_COLLECTION = 'purchases';
@@ -60,10 +60,10 @@ function saveLocalPurchaseItems(items: PurchaseItem[]) {
 export const purchaseService = {
   /**
    * Process a complete purchase entry:
-   * 1. Updates product stocks and costs/sale prices.
-   * 2. Registers purchase and purchase_items in Firestore and Local Cache.
+   * 1. Updates product stocks for target location and costs/sale prices.
+   * 2. Registers purchase and purchase_items in Firestore and Local Cache with locationId.
    */
-  async processPurchase(input: ProcessPurchaseInput): Promise<{ purchase: Purchase; updatedProducts: Product[] }> {
+  async processPurchase(input: ProcessPurchaseInput, locationId: string = 'aimogasta'): Promise<{ purchase: Purchase; updatedProducts: Product[] }> {
     if (!input.providerId || !input.providerName) {
       throw new Error('Debe seleccionar un proveedor válido');
     }
@@ -71,6 +71,7 @@ export const purchaseService = {
       throw new Error('El ingreso debe contener al menos un producto');
     }
 
+    const targetLocationKey = input.locationId || locationId || 'aimogasta';
     const nowIso = new Date().toISOString();
     const purchaseId = `purch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
@@ -110,17 +111,26 @@ export const purchaseService = {
         suggestedSalePrice: item.suggestedSalePrice,
         finalSalePrice: item.finalSalePrice,
         purchaseDate: nowIso,
+        locationId: targetLocationKey,
       };
 
       purchaseItems.push(pItem);
 
-      // Calculate new product stock and metadata
-      const currentStock = prod.stockQuantity || 0;
-      const newStock = currentStock + quantity;
+      // Calculate new product stock per location
+      const legacyStock = prod.stockQuantity ?? (prod as any).stock ?? 0;
+      const currentLocStock = getProductStock(prod, targetLocationKey);
+      const newLocStock = currentLocStock + quantity;
+      
+      const stockByLoc = prod.stockByLocation && typeof prod.stockByLocation === 'object'
+        ? { ...prod.stockByLocation, [targetLocationKey]: newLocStock }
+        : { aimogasta: targetLocationKey === 'aimogasta' ? legacyStock + quantity : legacyStock, olascoaga: targetLocationKey === 'olascoaga' ? quantity : 0 };
+
+      const newTotalStock = getTotalStock({ ...prod, stockByLocation: stockByLoc });
 
       const updatedProd: Product = {
         ...prod,
-        stockQuantity: newStock,
+        stockByLocation: stockByLoc,
+        stockQuantity: newTotalStock,
         currentCost: unitCost,
         lastCost: unitCost,
         costPrice: unitCost,
@@ -142,6 +152,7 @@ export const purchaseService = {
       totalAmount,
       totalItemsCount,
       items: purchaseItems,
+      locationId: targetLocationKey,
     };
 
     // Firestore batch execution
@@ -158,6 +169,7 @@ export const purchaseService = {
         totalAmount: newPurchase.totalAmount,
         totalItemsCount: newPurchase.totalItemsCount,
         itemsCount: newPurchase.items.length,
+        locationId: targetLocationKey,
       });
 
       // 2. Add purchase_items docs
@@ -181,6 +193,7 @@ export const purchaseService = {
           suggestedSalePrice: pItem.suggestedSalePrice,
           finalSalePrice: pItem.finalSalePrice,
           purchaseDate: serverTimestamp(),
+          locationId: targetLocationKey,
         };
 
         if (pItem.previousCost !== undefined) sanitizedItem.previousCost = pItem.previousCost;
@@ -193,6 +206,7 @@ export const purchaseService = {
       for (const updatedProd of updatedProducts) {
         const prodRef = doc(db, PRODUCTS_COLLECTION, updatedProd.id);
         const prodUpdates: Record<string, any> = {
+          stockByLocation: updatedProd.stockByLocation,
           stockQuantity: updatedProd.stockQuantity,
           stock: updatedProd.stockQuantity,
           currentCost: updatedProd.currentCost,
@@ -215,6 +229,7 @@ export const purchaseService = {
       for (const updatedProd of updatedProducts) {
         try {
           await productService.updateProduct(updatedProd.id, {
+            stockByLocation: updatedProd.stockByLocation,
             stockQuantity: updatedProd.stockQuantity,
             salePrice: updatedProd.salePrice,
             currentCost: updatedProd.currentCost,
@@ -283,6 +298,7 @@ export const purchaseService = {
           suggestedSalePrice: data.suggestedSalePrice || 0,
           finalSalePrice: data.finalSalePrice || 0,
           purchaseDate: data.purchaseDate?.toDate ? data.purchaseDate.toDate().toISOString() : (data.purchaseDate || new Date().toISOString()),
+          locationId: data.locationId || 'aimogasta',
         });
       });
     } catch (err) {
@@ -313,3 +329,4 @@ export const purchaseService = {
     };
   }
 };
+

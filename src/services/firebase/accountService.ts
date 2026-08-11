@@ -10,6 +10,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './config';
 import { AccountMovement } from '../../types/account';
+import { LocationSelection } from '../../types/location';
 
 const MOVEMENTS_COLLECTION = 'account_movements';
 const LOCAL_MOVEMENTS_KEY = 'despensa_stock_local_movements';
@@ -33,9 +34,9 @@ function saveLocalMovements(movements: AccountMovement[]) {
 
 export const accountService = {
   /**
-   * Fetch all movements for a specific customer
+   * Fetch all movements for a specific customer, optionally filtered by locationId
    */
-  async getCustomerMovements(customerId: string): Promise<AccountMovement[]> {
+  async getCustomerMovements(customerId: string, locationId?: LocationSelection): Promise<AccountMovement[]> {
     try {
       const q = query(
         collection(db, MOVEMENTS_COLLECTION),
@@ -47,16 +48,20 @@ export const accountService = {
 
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
-        movements.push({
-          id: docSnap.id,
-          customerId: data.customerId,
-          type: data.type,
-          amount: data.amount || 0,
-          createdAt: data.createdAtIso || (data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString()),
-          description: data.description || '',
-          saleId: data.saleId || undefined,
-          notes: data.notes || '',
-        });
+        const movLoc = data.locationId || 'aimogasta';
+        if (!locationId || locationId === 'all' || movLoc === locationId) {
+          movements.push({
+            id: docSnap.id,
+            customerId: data.customerId,
+            type: data.type,
+            amount: data.amount || 0,
+            createdAt: data.createdAtIso || (data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString()),
+            description: data.description || '',
+            saleId: data.saleId || undefined,
+            locationId: movLoc,
+            notes: data.notes || '',
+          });
+        }
       });
 
       // Update local storage for this customer's movements
@@ -69,15 +74,15 @@ export const accountService = {
       console.warn(`Error al obtener movimientos de Firestore para el cliente ${customerId}, usando cache local:`, err);
       const local = getLocalMovements();
       return local
-        .filter((m) => m.customerId === customerId)
+        .filter((m) => m.customerId === customerId && (!locationId || locationId === 'all' || (m.locationId || 'aimogasta') === locationId))
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     }
   },
 
   /**
-   * Get all movements from all customers
+   * Get all movements from all customers, optionally filtered by locationId
    */
-  async getAllMovements(): Promise<AccountMovement[]> {
+  async getAllMovements(locationId?: LocationSelection): Promise<AccountMovement[]> {
     try {
       const q = query(collection(db, MOVEMENTS_COLLECTION), orderBy('createdAt', 'desc'));
       const snapshot = await getDocs(q);
@@ -85,31 +90,37 @@ export const accountService = {
 
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
-        movements.push({
-          id: docSnap.id,
-          customerId: data.customerId,
-          type: data.type,
-          amount: data.amount || 0,
-          createdAt: data.createdAtIso || (data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString()),
-          description: data.description || '',
-          saleId: data.saleId || undefined,
-          notes: data.notes || '',
-        });
+        const movLoc = data.locationId || 'aimogasta';
+        if (!locationId || locationId === 'all' || movLoc === locationId) {
+          movements.push({
+            id: docSnap.id,
+            customerId: data.customerId,
+            type: data.type,
+            amount: data.amount || 0,
+            createdAt: data.createdAtIso || (data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString()),
+            description: data.description || '',
+            saleId: data.saleId || undefined,
+            locationId: movLoc,
+            notes: data.notes || '',
+          });
+        }
       });
 
       saveLocalMovements(movements);
       return movements;
     } catch (err) {
       console.warn('Error al obtener todos los movimientos de Firestore, usando cache local:', err);
-      return getLocalMovements();
+      const local = getLocalMovements();
+      if (!locationId || locationId === 'all') return local;
+      return local.filter(m => (m.locationId || 'aimogasta') === locationId);
     }
   },
 
   /**
    * Calculate current pending debt balance for a single customer
    */
-  async getCustomerBalance(customerId: string): Promise<number> {
-    const movements = await this.getCustomerMovements(customerId);
+  async getCustomerBalance(customerId: string, locationId?: LocationSelection): Promise<number> {
+    const movements = await this.getCustomerMovements(customerId, locationId);
     let balance = 0;
     for (const mov of movements) {
       if (mov.type === 'DEBT') {
@@ -124,8 +135,8 @@ export const accountService = {
   /**
    * Get map of customer balances: { [customerId]: balance }
    */
-  async getAllBalances(): Promise<Record<string, number>> {
-    const allMovements = await this.getAllMovements();
+  async getAllBalances(locationId?: LocationSelection): Promise<Record<string, number>> {
+    const allMovements = await this.getAllMovements(locationId);
     const balances: Record<string, number> = {};
 
     for (const mov of allMovements) {
@@ -155,12 +166,14 @@ export const accountService = {
     amount: number, 
     description: string, 
     saleId?: string, 
+    locationId: string = 'aimogasta',
     notes?: string
   ): Promise<AccountMovement> {
     if (amount <= 0) {
       throw new Error('El importe de la deuda debe ser mayor a cero.');
     }
 
+    const targetLoc = locationId || 'aimogasta';
     const nowIso = new Date().toISOString();
     const movementId = `mov_debt_${Date.now()}`;
 
@@ -172,6 +185,7 @@ export const accountService = {
       createdAt: nowIso,
       description: description || 'Venta fiada',
       saleId,
+      locationId: targetLoc,
       notes,
     };
 
@@ -181,6 +195,7 @@ export const accountService = {
       type: 'DEBT',
       amount,
       description: newMov.description,
+      locationId: targetLoc,
       createdAtIso: nowIso,
       createdAt: serverTimestamp(),
     };
@@ -208,16 +223,18 @@ export const accountService = {
     customerId: string, 
     amount: number, 
     notes?: string,
-    paymentMethod: 'cash' | 'mercado_pago' | 'transfer' | 'other' = 'cash'
+    paymentMethod: 'cash' | 'mercado_pago' | 'transfer' | 'other' = 'cash',
+    locationId: string = 'aimogasta'
   ): Promise<AccountMovement> {
     if (amount <= 0) {
       throw new Error('El importe del pago debe ser mayor a cero.');
     }
 
+    const targetLoc = locationId || 'aimogasta';
     const currentBalance = await this.getCustomerBalance(customerId);
     if (amount > currentBalance) {
       throw new Error(
-        `El pago ($${amount.toLocaleString('es-AR')}) no puede superar la deuda pendiente actual ($${currentBalance.toLocaleString('es-AR')}).`
+        `El pago (${amount.toLocaleString('es-AR')}) no puede superar la deuda pendiente actual (${currentBalance.toLocaleString('es-AR')}).`
       );
     }
 
@@ -232,6 +249,7 @@ export const accountService = {
       createdAt: nowIso,
       description: 'Pago a cuenta',
       notes,
+      locationId: targetLoc,
       paymentMethod,
     };
 
@@ -241,6 +259,7 @@ export const accountService = {
       type: 'PAYMENT',
       amount,
       paymentMethod,
+      locationId: targetLoc,
       description: newMov.description,
       createdAtIso: nowIso,
       createdAt: serverTimestamp(),
@@ -261,3 +280,4 @@ export const accountService = {
     return newMov as AccountMovement;
   },
 };
+

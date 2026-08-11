@@ -13,6 +13,7 @@ export interface CashMovement {
   date: string; // YYYY-MM-DD
   sourceType: CashSourceType;
   sourceId: string;
+  locationId?: string;
   notes?: string;
   createdAt: string; // ISO string
 }
@@ -25,6 +26,7 @@ export interface CashClosure {
   expectedCash: number;
   countedCash: number;
   difference: number; // countedCash - expectedCash
+  locationId?: string;
   notes?: string;
   createdAt: string; // ISO string
 }

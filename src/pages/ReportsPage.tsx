@@ -8,6 +8,9 @@ import { Product, NavigationTab } from '../types/product';
 import { reportsService } from '../services/reportsService';
 import { purchaseService } from '../services/firebase/purchaseService';
 import { PurchaseItem } from '../types/purchase';
+import { useLocation } from '../context/LocationContext';
+import { getLocationName } from '../types/location';
+import { LocationSelector } from '../components/common/LocationSelector';
 import { 
   BarChart3, 
   Calendar, 
@@ -32,7 +35,8 @@ import {
   Award,
   ArrowUpRight,
   ArrowDownRight,
-  Minus
+  Minus,
+  Building2
 } from 'lucide-react';
 
 interface ReportsPageProps {
@@ -41,6 +45,8 @@ interface ReportsPageProps {
 }
 
 export const ReportsPage: React.FC<ReportsPageProps> = ({ products, onNavigate }) => {
+  const { reportLocationFilter, getLocationName } = useLocation();
+
   // Filter state
   const [period, setPeriod] = useState<ReportPeriodOption>('thisMonth');
   const [fromDate, setFromDate] = useState<string>(() => {
@@ -69,7 +75,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ products, onNavigate }
     setError(null);
     try {
       const filter: ReportFilter = { period, fromDate, toDate };
-      const data = await reportsService.generateFullReport(filter);
+      const data = await reportsService.generateFullReport(filter, reportLocationFilter);
       setReport(data);
     } catch (err) {
       console.error('Error al generar reporte:', err);
@@ -77,7 +83,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ products, onNavigate }
     } finally {
       setLoading(false);
     }
-  }, [period, fromDate, toDate]);
+  }, [period, fromDate, toDate, reportLocationFilter]);
 
   useEffect(() => {
     loadReport();
@@ -148,8 +154,14 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ products, onNavigate }
               <BarChart3 className="w-6 h-6" />
             </div>
             <div>
-              <h1 className="text-2xl font-black tracking-tight">📊 Reportes</h1>
-              <p className="text-xs text-slate-400 font-medium">Resumen comercial de tu negocio</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-2xl font-black tracking-tight">📊 Reportes</h1>
+                <span className="text-[11px] font-black uppercase text-emerald-400 bg-emerald-500/20 px-2.5 py-0.5 rounded-full border border-emerald-500/30 flex items-center gap-1">
+                  <Building2 className="w-3 h-3" />
+                  {getLocationName(reportLocationFilter)}
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 font-medium">Resumen comercial por sucursal o consolidado general</p>
             </div>
           </div>
         </div>
@@ -165,7 +177,15 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ products, onNavigate }
       </div>
 
       {/* FILTER BAR */}
-      <div className="bg-white p-4 rounded-3xl border border-slate-200/80 shadow-2xs space-y-3">
+      <div className="bg-white p-4 rounded-3xl border border-slate-200/80 shadow-2xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+          <div className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-slate-600">
+            <Building2 className="w-4 h-4 text-emerald-600" />
+            <span>Sucursal a analizar:</span>
+          </div>
+          <LocationSelector allowAll={true} />
+        </div>
+
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-slate-500">
             <Calendar className="w-4 h-4 text-emerald-600" />

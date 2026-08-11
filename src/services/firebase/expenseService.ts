@@ -11,6 +11,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './config';
 import { Expense, CreateExpenseInput, UpdateExpenseInput } from '../../types/expense';
+import { LocationSelection } from '../../types/location';
 
 const EXPENSES_COLLECTION = 'expenses';
 const LOCAL_EXPENSES_KEY = 'despensa_stock_local_expenses';
@@ -37,7 +38,7 @@ export const expenseService = {
   /**
    * Create a new expense document in Firestore and update local storage cache.
    */
-  async createExpense(input: CreateExpenseInput): Promise<Expense> {
+  async createExpense(input: CreateExpenseInput, locationId: string = 'aimogasta'): Promise<Expense> {
     if (!input.category) {
       throw new Error('Debe seleccionar una categoría');
     }
@@ -48,6 +49,7 @@ export const expenseService = {
       throw new Error('El importe debe ser un número mayor a cero');
     }
 
+    const targetLocationKey = input.locationId || locationId || 'aimogasta';
     const nowIso = new Date().toISOString();
     const expenseId = `exp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
@@ -58,6 +60,7 @@ export const expenseService = {
       amount: input.amount,
       date: input.date || nowIso.split('T')[0],
       paymentMethod: input.paymentMethod || 'cash',
+      locationId: targetLocationKey,
       notes: input.notes?.trim() || '',
       recurrent: Boolean(input.recurrent),
       createdAt: nowIso,
@@ -73,6 +76,7 @@ export const expenseService = {
         amount: newExpense.amount,
         date: newExpense.date,
         paymentMethod: newExpense.paymentMethod,
+        locationId: targetLocationKey,
         notes: newExpense.notes,
         recurrent: newExpense.recurrent,
         createdAt: serverTimestamp(),
@@ -91,9 +95,9 @@ export const expenseService = {
   },
 
   /**
-   * Get all registered expenses ordered by date descending.
+   * Get all registered expenses ordered by date descending, optionally filtered by locationId.
    */
-  async getExpenses(): Promise<Expense[]> {
+  async getExpenses(locationId?: LocationSelection): Promise<Expense[]> {
     let list: Expense[] = [];
 
     try {
@@ -110,22 +114,30 @@ export const expenseService = {
           dateStr = data.createdAt.toDate().toISOString().split('T')[0];
         }
 
-        list.push({
-          id: docSnap.id,
-          category: data.category || 'Otros',
-          description: data.description || '',
-          amount: data.amount || 0,
-          date: dateStr || new Date().toISOString().split('T')[0],
-          paymentMethod: data.paymentMethod || 'cash',
-          notes: data.notes || '',
-          recurrent: Boolean(data.recurrent),
-          createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : (data.createdAt || new Date().toISOString()),
-          updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : (data.updatedAt || new Date().toISOString()),
-        });
+        const expLocation = data.locationId || 'aimogasta';
+
+        if (!locationId || locationId === 'all' || expLocation === locationId) {
+          list.push({
+            id: docSnap.id,
+            category: data.category || 'Otros',
+            description: data.description || '',
+            amount: data.amount || 0,
+            date: dateStr || new Date().toISOString().split('T')[0],
+            paymentMethod: data.paymentMethod || 'cash',
+            locationId: expLocation,
+            notes: data.notes || '',
+            recurrent: Boolean(data.recurrent),
+            createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : (data.createdAt || new Date().toISOString()),
+            updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : (data.updatedAt || new Date().toISOString()),
+          });
+        }
       });
     } catch (err) {
       console.warn('Error querying expenses from Firestore, using local cache fallback:', err);
-      list = getLocalExpenses();
+      const local = getLocalExpenses();
+      list = (!locationId || locationId === 'all')
+        ? local
+        : local.filter(e => (e.locationId || 'aimogasta') === locationId);
     }
 
     // Sort descending by date, then by createdAt
@@ -207,10 +219,10 @@ export const expenseService = {
 
   /**
    * Calculate total merchandise purchases from purchases collection for period comparison.
-   * This retrieves purchases from INGRESO DE MERCADERÍA without duplicating them into expenses.
+   * Filtered by locationId if provided.
    */
-  async getMerchandisePurchases(filter?: 'today' | 'month' | 'all'): Promise<number> {
-    let purchases: { totalAmount: number; createdAt: string }[] = [];
+  async getMerchandisePurchases(filter?: 'today' | 'month' | 'all', locationId?: LocationSelection): Promise<number> {
+    let purchases: { totalAmount: number; createdAt: string; locationId?: string }[] = [];
 
     try {
       const q = query(collection(db, 'purchases'), orderBy('createdAt', 'desc'));
@@ -224,6 +236,7 @@ export const expenseService = {
         purchases.push({
           totalAmount: data.totalAmount || 0,
           createdAt: dateStr || new Date().toISOString(),
+          locationId: data.locationId || 'aimogasta',
         });
       });
     } catch (err) {
@@ -232,6 +245,10 @@ export const expenseService = {
         const raw = localStorage.getItem(LOCAL_PURCHASES_KEY);
         if (raw) purchases = JSON.parse(raw);
       } catch {}
+    }
+
+    if (locationId && locationId !== 'all') {
+      purchases = purchases.filter(p => (p.locationId || 'aimogasta') === locationId);
     }
 
     const now = new Date();
@@ -255,3 +272,4 @@ export const expenseService = {
     }, 0);
   }
 };
+

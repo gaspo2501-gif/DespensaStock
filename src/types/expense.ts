@@ -22,6 +22,7 @@ export interface Expense {
   amount: number;
   date: string; // ISO date string format YYYY-MM-DD
   paymentMethod: ExpensePaymentMethod;
+  locationId?: string;
   notes?: string;
   recurrent: boolean;
   createdAt: string; // ISO string
