@@ -173,15 +173,22 @@ export const SalesPage: React.FC<SalesPageProps> = ({
 
   // Barcode scan handler inside sales modal
   const handleBarcodeScanned = async (barcode: string) => {
+    const cleanBarcode = barcode.trim();
+    if (!cleanBarcode) return;
+
     try {
-      const found = await productService.getByBarcode(barcode);
+      const localMatch = products.find(
+        (p) => p.barcode && p.barcode.trim().toLowerCase() === cleanBarcode.toLowerCase()
+      );
+      const found = localMatch || (await productService.getByBarcode(cleanBarcode));
+
       if (found) {
         handleAddProductToCart(found);
       } else {
         playScanSound('error');
         setFeedback({
           type: 'error',
-          message: `Código de barras ${barcode} no encontrado en el catálogo.`,
+          message: `Producto no encontrado para el código: ${cleanBarcode}`,
         });
       }
     } catch (err) {
@@ -427,11 +434,15 @@ export const SalesPage: React.FC<SalesPageProps> = ({
               </button>
             </div>
 
-            {/* Real-time Search Component */}
+            {/* Real-time Search Component with USB Barcode Scanner Support */}
             <ProductSearch
               products={products}
               onSelectProduct={handleAddProductToCart}
-              placeholder="🔎 Buscar producto por nombre, marca, presentación o EAN..."
+              onBarcodeNotFound={handleBarcodeScanned}
+              locationId={activeLocation}
+              autoFocus={true}
+              showScannerIndicator={true}
+              placeholder="🔎 Buscar o escanear por nombre, marca, presentación o EAN..."
             />
           </div>
 

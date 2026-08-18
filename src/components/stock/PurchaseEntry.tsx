@@ -8,6 +8,7 @@ import { purchaseService } from '../../services/firebase/purchaseService';
 import { providerService } from '../../services/firebase/providerService';
 import { ProviderModal } from '../provider/ProviderModal';
 import { BarcodeScanner } from '../scanner/BarcodeScanner';
+import { BarcodeInput } from '../scanner/BarcodeInput';
 import { ProductForm } from '../product/ProductForm';
 import { NumericInput } from '../common/NumericInput';
 import { playScanSound } from '../../utils/audio';
@@ -352,16 +353,14 @@ export const PurchaseEntry: React.FC<PurchaseEntryProps> = ({
               Escanear Código de Barras
             </button>
 
-            <div className="relative">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
-              <input
-                type="text"
-                placeholder="Buscar por nombre o código..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
-            </div>
+            <BarcodeInput
+              value={searchTerm}
+              onChange={(val) => setSearchTerm(val)}
+              onBarcodeDetected={(code) => handleBarcodeScanned(code)}
+              placeholder="Escanear con lector USB o buscar por nombre..."
+              showIndicator={true}
+              clearOnSubmit={false}
+            />
           </div>
 
           {/* Quick Search Results Dropdown */}

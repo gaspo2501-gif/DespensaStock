@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Product, CreateProductInput } from '../types/product';
 import { PurchaseEntry } from '../components/stock/PurchaseEntry';
 import { BarcodeScanner } from '../components/scanner/BarcodeScanner';
+import { BarcodeInput } from '../components/scanner/BarcodeInput';
 import { ProductCard } from '../components/product/ProductCard';
 import { ProductForm } from '../components/product/ProductForm';
 import { StockManager } from '../components/product/StockManager';
@@ -728,27 +729,31 @@ export const StockPage: React.FC<StockPageProps> = ({
                 )}
               </div>
 
-              {/* Manual EAN Input Fallback */}
+              {/* USB Barcode / Manual EAN Input */}
               <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-3">
                 <h4 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider text-center">
-                  O Ingresar EAN Manualmente
+                  O Ingresar EAN con Lector USB / Teclado
                 </h4>
 
-                <form onSubmit={handleManualSearchSubmit} className="flex gap-2">
-                  <input
-                    type="text"
+                <form onSubmit={handleManualSearchSubmit} className="space-y-2">
+                  <BarcodeInput
                     value={manualEanInput}
-                    onChange={(e) => setManualEanInput(e.target.value)}
-                    placeholder="Ej: 7791234567890"
-                    className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-2xl text-xs font-mono font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                    onChange={(val) => setManualEanInput(val)}
+                    onBarcodeDetected={(code) => handleBarcodeScanned(code)}
+                    placeholder="Escanear código con lector USB o escribir EAN..."
+                    autoFocus={true}
+                    showIndicator={true}
+                    clearOnSubmit={false}
                   />
-                  <button
-                    type="submit"
-                    disabled={!manualEanInput.trim()}
-                    className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white font-extrabold text-xs rounded-2xl transition-colors shrink-0"
-                  >
-                    Buscar
-                  </button>
+                  <div className="flex justify-end">
+                    <button
+                      type="submit"
+                      disabled={!manualEanInput.trim()}
+                      className="w-full sm:w-auto px-6 py-2.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white font-extrabold text-xs rounded-2xl transition-colors"
+                    >
+                      Buscar Producto
+                    </button>
+                  </div>
                 </form>
               </div>
             </div>

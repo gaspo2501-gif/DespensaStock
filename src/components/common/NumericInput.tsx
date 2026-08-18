@@ -30,7 +30,7 @@ export const NumericInput: React.FC<NumericInputProps> = ({
 
   const handleFocus = (e: React.FocusEvent<HTMLInputElement>) => {
     selectContent();
-    // Microtask timeout to beat mobile browsers' auto-deselect after focus
+    // Microtask timeouts for mobile & web browser auto-select retention
     setTimeout(selectContent, 20);
     setTimeout(selectContent, 100);
     if (onFocus) onFocus(e);
@@ -49,9 +49,14 @@ export const NumericInput: React.FC<NumericInputProps> = ({
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     let rawVal = e.target.value;
 
-    // Automatically strip leading zeros if followed by digits (e.g., "025" -> "25")
-    if (/^0[0-9]+/.test(rawVal)) {
+    // Fix concatenation issue when typing after '0':
+    // If string starts with leading 0 followed immediately by digits (e.g. "01500" -> "1500")
+    if (/^0+[1-9]/.test(rawVal)) {
       rawVal = rawVal.replace(/^0+/, '');
+      e.target.value = rawVal;
+    } else if (/^0+0+$/.test(rawVal)) {
+      // If user types "00", keep as single "0"
+      rawVal = '0';
       e.target.value = rawVal;
     }
 
