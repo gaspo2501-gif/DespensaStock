@@ -13,6 +13,8 @@ import { NumericInput } from '../components/common/NumericInput';
 import { playScanSound } from '../utils/audio';
 import { useLocation } from '../context/LocationContext';
 import { getLocationName } from '../types/location';
+import { SalesHistoryModal } from '../components/modals/SalesHistoryModal';
+import { SaleDetailModal } from '../components/modals/SaleDetailModal';
 import { 
   ShoppingCart, 
   ScanLine, 
@@ -33,7 +35,9 @@ import {
   UserPlus,
   QrCode,
   Banknote,
-  MapPin
+  MapPin,
+  History,
+  Receipt
 } from 'lucide-react';
 
 interface SalesPageProps {
@@ -66,6 +70,8 @@ export const SalesPage: React.FC<SalesPageProps> = ({
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'warning'; message: string } | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [completedSale, setCompletedSale] = useState<SaleRecord | null>(null);
+  const [showSalesHistory, setShowSalesHistory] = useState<boolean>(false);
+  const [saleDetailToShow, setSaleDetailToShow] = useState<SaleRecord | null>(null);
 
   // Helper to clear feedback banner
   const clearFeedback = () => setFeedback(null);
@@ -340,15 +346,26 @@ export const SalesPage: React.FC<SalesPageProps> = ({
           </div>
         </div>
 
-        {cart.length > 0 && (
+        <div className="flex items-center gap-2">
           <button
-            onClick={handleClearCart}
-            className="px-3 py-1.5 text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-xl transition-colors flex items-center gap-1"
+            onClick={() => setShowSalesHistory(true)}
+            className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 text-xs font-bold rounded-2xl flex items-center gap-1.5 transition-colors shadow-2xs"
+            title="Ver historial de ventas realizadas"
           >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Vaciar</span>
+            <History className="w-4 h-4 text-emerald-600" />
+            <span className="hidden sm:inline">Historial</span>
           </button>
-        )}
+
+          {cart.length > 0 && (
+            <button
+              onClick={handleClearCart}
+              className="px-3 py-2 text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-2xl transition-colors flex items-center gap-1"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Vaciar</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* COMPLETED SALE CONFIRMATION SCREEN */}
@@ -406,13 +423,22 @@ export const SalesPage: React.FC<SalesPageProps> = ({
             </div>
           </div>
 
-          <button
-            onClick={() => setCompletedSale(null)}
-            className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm rounded-2xl shadow-lg transition-all active:scale-98 flex items-center justify-center gap-2"
-          >
-            <Plus className="w-5 h-5 stroke-[2.5]" />
-            Iniciar Nueva Venta
-          </button>
+          <div className="flex flex-col sm:flex-row items-center gap-2">
+            <button
+              onClick={() => setSaleDetailToShow(completedSale)}
+              className="w-full sm:w-1/2 py-3.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-2xl transition-all flex items-center justify-center gap-1.5"
+            >
+              <Receipt className="w-4 h-4 text-emerald-600" />
+              Ver Detalle / Ticket
+            </button>
+            <button
+              onClick={() => setCompletedSale(null)}
+              className="w-full sm:w-1/2 py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-2xl shadow-lg transition-all active:scale-98 flex items-center justify-center gap-2"
+            >
+              <Plus className="w-4 h-4 stroke-[2.5]" />
+              Nueva Venta
+            </button>
+          </div>
         </div>
       ) : (
         <>
@@ -844,6 +870,40 @@ export const SalesPage: React.FC<SalesPageProps> = ({
           title="Crear Cliente para Venta Fiada"
           onSubmit={handleCreateCustomerFromSale}
           onCancel={() => setShowCreateCustomerModal(false)}
+        />
+      )}
+
+      {/* SALES HISTORY MODAL */}
+      {showSalesHistory && (
+        <SalesHistoryModal
+          isOpen={showSalesHistory}
+          onClose={() => setShowSalesHistory(false)}
+          onSaleCancelled={async () => {
+            try {
+              const updated = await productService.getAllProducts();
+              onProductsUpdated(updated);
+              loadCustomersData();
+            } catch (err) {
+              console.error('Error actualizando productos tras anulación:', err);
+            }
+          }}
+        />
+      )}
+
+      {/* SALE DETAIL MODAL */}
+      {saleDetailToShow && (
+        <SaleDetailModal
+          sale={saleDetailToShow}
+          onClose={() => setSaleDetailToShow(null)}
+          onOperationCancelled={async () => {
+            try {
+              const updated = await productService.getAllProducts();
+              onProductsUpdated(updated);
+              loadCustomersData();
+            } catch (err) {
+              console.error('Error actualizando productos tras anulación:', err);
+            }
+          }}
         />
       )}
     </div>

@@ -27,6 +27,9 @@ export interface Expense {
   recurrent: boolean;
   createdAt: string; // ISO string
   updatedAt: string; // ISO string
+  status?: 'ACTIVE' | 'CANCELLED';
+  cancelledAt?: string;
+  cancellationReason?: string;
 }
 
 export type CreateExpenseInput = Omit<Expense, 'id' | 'createdAt' | 'updatedAt'>;

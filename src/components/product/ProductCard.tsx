@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
-import { Product } from '../../types/product';
+import { Product, getStockForLocation, getTotalStock } from '../../types/product';
 import { Barcode, Package, Edit3, Trash2, ArrowRight } from 'lucide-react';
 import { getCategoryBadgeColor } from '../../utils/categories';
+import { useLocation } from '../../context/LocationContext';
+import { getLocationName } from '../../types/location';
 
 interface ProductCardProps {
   product: Product;
@@ -18,7 +20,11 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   onDelete,
   showActions = true,
 }) => {
+  const { activeLocation } = useLocation();
   const [imgError, setImgError] = useState(false);
+
+  const locStock = getStockForLocation(product, activeLocation);
+  const totalStock = getTotalStock(product);
 
   const sourceLabels = {
     local: { label: 'Base Propia', bg: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
@@ -45,11 +51,11 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 
           <div className="flex items-center gap-1.5">
             <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border ${
-              (product.stockQuantity ?? 0) > 0 
+              locStock > 0 
                 ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
                 : 'bg-rose-50 text-rose-700 border-rose-200'
             }`}>
-              Stock: {product.stockQuantity ?? 0}
+              Stock: {locStock}
             </span>
 
             <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${currentSource.bg}`}>

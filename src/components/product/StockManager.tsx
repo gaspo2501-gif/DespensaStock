@@ -12,6 +12,7 @@ interface StockManagerProps {
   onStockUpdated: (updatedProduct: Product) => void;
   onScanNext?: () => void;
   className?: string;
+  initialOperation?: StockOperation;
 }
 
 export const StockManager: React.FC<StockManagerProps> = ({
@@ -19,9 +20,16 @@ export const StockManager: React.FC<StockManagerProps> = ({
   onStockUpdated,
   onScanNext,
   className = '',
+  initialOperation = 'add',
 }) => {
   const { activeLocation } = useLocation();
-  const [operation, setOperation] = useState<StockOperation>('add');
+  const [operation, setOperation] = useState<StockOperation>(initialOperation);
+
+  useEffect(() => {
+    if (initialOperation) {
+      setOperation(initialOperation);
+    }
+  }, [initialOperation, product.id]);
   const [amountInput, setAmountInput] = useState<string>('1');
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);

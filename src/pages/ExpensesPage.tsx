@@ -9,6 +9,8 @@ import {
 } from '../types/expense';
 import { expenseService } from '../services/firebase/expenseService';
 import { NumericInput } from '../components/common/NumericInput';
+import { ExpenseDetailModal } from '../components/modals/ExpenseDetailModal';
+import { formatLocalDate, getArgentinaToday, getArgentinaCurrentMonth } from '../utils/dateUtils';
 import { 
   Receipt, 
   Plus, 
@@ -26,14 +28,17 @@ import {
   CheckCircle2, 
   AlertTriangle,
   Repeat,
-  Wallet
+  Wallet,
+  ChevronRight,
+  Eye
 } from 'lucide-react';
 
 interface ExpensesPageProps {
-  onBackToHome: () => void;
+  onBackToHome?: () => void;
+  isEmbedded?: boolean;
 }
 
-export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onBackToHome }) => {
+export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onBackToHome, isEmbedded = false }) => {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [merchandisePurchasesToday, setMerchandisePurchasesToday] = useState<number>(0);
   const [merchandisePurchasesMonth, setMerchandisePurchasesMonth] = useState<number>(0);
@@ -46,12 +51,13 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onBackToHome }) => {
   // Modal form states
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+  const [selectedExpenseForDetail, setSelectedExpenseForDetail] = useState<Expense | null>(null);
 
   // Form field state
   const [formCategory, setFormCategory] = useState<ExpenseCategory>('Electricidad');
   const [formDescription, setFormDescription] = useState<string>('');
   const [formAmount, setFormAmount] = useState<number>(0);
-  const [formDate, setFormDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [formDate, setFormDate] = useState<string>(getArgentinaToday());
   const [formPaymentMethod, setFormPaymentMethod] = useState<ExpensePaymentMethod>('cash');
   const [formNotes, setFormNotes] = useState<string>('');
   const [formRecurrent, setFormRecurrent] = useState<boolean>(false);
@@ -89,23 +95,25 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onBackToHome }) => {
   }, [loadData]);
 
   // Calculations for summary indicators
-  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
-  const currentMonthPrefix = useMemo(() => todayStr.substring(0, 7), [todayStr]);
+  const todayStr = useMemo(() => getArgentinaToday(), []);
+  const currentMonthPrefix = useMemo(() => getArgentinaCurrentMonth(), []);
 
   const todayExpensesSum = useMemo(() => {
     return expenses
-      .filter((e) => e.date === todayStr)
+      .filter((e) => e.status !== 'CANCELLED' && e.date === todayStr)
       .reduce((acc, e) => acc + e.amount, 0);
   }, [expenses, todayStr]);
 
   const monthExpensesSum = useMemo(() => {
     return expenses
-      .filter((e) => e.date.startsWith(currentMonthPrefix))
+      .filter((e) => e.status !== 'CANCELLED' && e.date.startsWith(currentMonthPrefix))
       .reduce((acc, e) => acc + e.amount, 0);
   }, [expenses, currentMonthPrefix]);
 
   const operationalExpensesSum = useMemo(() => {
-    return expenses.reduce((acc, e) => acc + e.amount, 0);
+    return expenses
+      .filter((e) => e.status !== 'CANCELLED')
+      .reduce((acc, e) => acc + e.amount, 0);
   }, [expenses]);
 
   const merchandisePurchasesSum = useMemo(() => {
@@ -134,7 +142,7 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onBackToHome }) => {
     setFormCategory('Electricidad');
     setFormDescription('');
     setFormAmount(0);
-    setFormDate(new Date().toISOString().split('T')[0]);
+    setFormDate(getArgentinaToday());
     setFormPaymentMethod('cash');
     setFormNotes('');
     setFormRecurrent(false);
@@ -224,31 +232,35 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onBackToHome }) => {
   };
 
   return (
-    <div className="space-y-6 pb-24 max-w-4xl mx-auto animate-fadeIn">
-      {/* HEADER BAR */}
-      <div className="flex items-center justify-between">
-        <button
-          onClick={onBackToHome}
-          className="p-2 text-slate-600 hover:text-slate-900 bg-white border border-slate-200 rounded-full transition-colors flex items-center gap-1 text-xs font-semibold"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          Inicio
-        </button>
+    <div className={`space-y-6 max-w-4xl mx-auto animate-fadeIn ${isEmbedded ? 'pb-8' : 'pb-24'}`}>
+      {/* HEADER BAR (Hidden if embedded inside CashPage) */}
+      {!isEmbedded && (
+        <div className="flex items-center justify-between">
+          {onBackToHome && (
+            <button
+              onClick={onBackToHome}
+              className="p-2 text-slate-600 hover:text-slate-900 bg-white border border-slate-200 rounded-full transition-colors flex items-center gap-1 text-xs font-semibold"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Inicio
+            </button>
+          )}
 
-        <h1 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
-          <Receipt className="w-5 h-5 text-rose-600" />
-          Módulo de Gastos
-        </h1>
+          <h1 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+            <Receipt className="w-5 h-5 text-rose-600" />
+            Módulo de Gastos
+          </h1>
 
-        <button
-          onClick={loadData}
-          disabled={loading}
-          className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-full transition-colors flex items-center justify-center"
-          title="Actualizar datos"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-        </button>
-      </div>
+          <button
+            onClick={loadData}
+            disabled={loading}
+            className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-full transition-colors flex items-center justify-center"
+            title="Actualizar datos"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
+      )}
 
       {/* 4. SUMMARY DASHBOARD CARDS */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -409,63 +421,87 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onBackToHome }) => {
           </div>
         ) : (
           <div className="space-y-2.5">
-            {filteredExpenses.map((expense) => (
-              <div
-                key={expense.id}
-                className="p-4 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 hover:border-slate-300 transition-all"
-              >
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs font-black text-slate-900 bg-white px-2 py-0.5 rounded-lg border border-slate-200 shadow-2xs">
-                      {expense.category}
-                    </span>
-                    {getPaymentMethodBadge(expense.paymentMethod)}
-                    {expense.recurrent && (
-                      <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded-md font-bold text-[10px] flex items-center gap-1">
-                        <Repeat className="w-3 h-3" /> Recurrente
+            {filteredExpenses.map((expense) => {
+              const isCancelled = expense.status === 'CANCELLED';
+              return (
+                <div
+                  key={expense.id}
+                  className={`p-4 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border transition-all ${
+                    isCancelled
+                      ? 'bg-rose-50/40 border-rose-200/80 opacity-80'
+                      : 'bg-slate-50 border-slate-200 hover:border-slate-300'
+                  }`}
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-black text-slate-900 bg-white px-2 py-0.5 rounded-lg border border-slate-200 shadow-2xs">
+                        {expense.category}
                       </span>
+                      {isCancelled ? (
+                        <span className="text-[10px] font-black text-rose-700 bg-rose-100/70 border border-rose-200 px-2 py-0.5 rounded-full">
+                          ANULADO
+                        </span>
+                      ) : (
+                        getPaymentMethodBadge(expense.paymentMethod)
+                      )}
+                      {expense.recurrent && (
+                        <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded-md font-bold text-[10px] flex items-center gap-1">
+                          <Repeat className="w-3 h-3" /> Recurrente
+                        </span>
+                      )}
+                    </div>
+
+                    <h3 className={`text-sm font-bold ${isCancelled ? 'text-slate-500 line-through' : 'text-slate-900'}`}>
+                      {expense.description}
+                    </h3>
+                    
+                    {expense.notes && (
+                      <p className="text-xs text-slate-500 italic">"{expense.notes}"</p>
                     )}
+
+                    <p className="text-[11px] text-slate-400 font-mono">
+                      Fecha: {formatLocalDate(expense.date)}
+                    </p>
                   </div>
 
-                  <h3 className="text-sm font-bold text-slate-900">{expense.description}</h3>
-                  
-                  {expense.notes && (
-                    <p className="text-xs text-slate-500 italic">"{expense.notes}"</p>
-                  )}
+                  <div className="flex items-center justify-between w-full sm:w-auto sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-200">
+                    <div className={`text-base sm:text-lg font-black font-mono ${
+                      isCancelled ? 'text-slate-400 line-through' : 'text-rose-700'
+                    }`}>
+                      ${expense.amount.toLocaleString('es-AR')}
+                    </div>
 
-                  <p className="text-[11px] text-slate-400 font-mono">
-                    Fecha: {new Date(expense.date + 'T12:00:00').toLocaleDateString('es-AR', {
-                      day: '2-digit',
-                      month: '2-digit',
-                      year: 'numeric'
-                    })}
-                  </p>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => setSelectedExpenseForDetail(expense)}
+                        className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-white rounded-xl border border-transparent hover:border-slate-200 transition-colors"
+                        title="Ver comprobante y detalle del gasto"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                      {!isCancelled && (
+                        <>
+                          <button
+                            onClick={() => openEditExpenseModal(expense)}
+                            className="p-2 text-slate-500 hover:text-slate-800 hover:bg-white rounded-xl border border-transparent hover:border-slate-200 transition-colors"
+                            title="Editar gasto"
+                          >
+                            <Edit3 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => setExpenseToDelete(expense)}
+                            className="p-2 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-xl transition-colors"
+                            title="Eliminar gasto"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
                 </div>
-
-                <div className="flex items-center justify-between w-full sm:w-auto sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-200">
-                  <div className="text-base sm:text-lg font-black font-mono text-rose-700">
-                    ${expense.amount.toLocaleString('es-AR')}
-                  </div>
-
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => openEditExpenseModal(expense)}
-                      className="p-2 text-slate-500 hover:text-slate-800 hover:bg-white rounded-xl border border-transparent hover:border-slate-200 transition-colors"
-                      title="Editar gasto"
-                    >
-                      <Edit3 className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => setExpenseToDelete(expense)}
-                      className="p-2 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-xl transition-colors"
-                      title="Eliminar gasto"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -671,6 +707,15 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onBackToHome }) => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* EXPENSE DETAIL MODAL */}
+      {selectedExpenseForDetail && (
+        <ExpenseDetailModal
+          expense={selectedExpenseForDetail}
+          onClose={() => setSelectedExpenseForDetail(null)}
+          onOperationCancelled={loadData}
+        />
       )}
     </div>
   );

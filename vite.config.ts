@@ -3,9 +3,15 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig} from 'vite';
 
-export default defineConfig(() => {
+export default defineConfig(({ command, mode }) => {
+  const isGitHubPages =
+    process.env.GITHUB_ACTIONS === 'true' ||
+    process.env.GITHUB_PAGES === 'true' ||
+    mode === 'gh-pages' ||
+    process.env.VITE_BASE_PATH === '/DespensaStock/';
+
   return {
-    base: '/DespensaStock/',
+    base: isGitHubPages ? '/DespensaStock/' : '/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
@@ -13,6 +19,8 @@ export default defineConfig(() => {
       },
     },
     server: {
+      port: 3000,
+      host: '0.0.0.0',
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',

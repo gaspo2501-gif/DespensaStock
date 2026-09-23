@@ -7,10 +7,16 @@ import {
 import { Product, NavigationTab } from '../types/product';
 import { reportsService } from '../services/reportsService';
 import { purchaseService } from '../services/firebase/purchaseService';
+import { customerService } from '../services/firebase/customerService';
+import { Customer } from '../types/customer';
 import { PurchaseItem } from '../types/purchase';
 import { useLocation } from '../context/LocationContext';
 import { getLocationName } from '../types/location';
 import { LocationSelector } from '../components/common/LocationSelector';
+import { PurchaseDetailModal } from '../components/modals/PurchaseDetailModal';
+import { CustomerDetailModal } from '../components/customer/CustomerDetailModal';
+import { SalesHistoryModal } from '../components/modals/SalesHistoryModal';
+import { getArgentinaFirstOfMonth, getArgentinaToday, formatLocalDate } from '../utils/dateUtils';
 import { 
   BarChart3, 
   Calendar, 
@@ -36,7 +42,10 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   Minus,
-  Building2
+  Building2,
+  History,
+  Eye,
+  User
 } from 'lucide-react';
 
 interface ReportsPageProps {
@@ -49,11 +58,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ products, onNavigate }
 
   // Filter state
   const [period, setPeriod] = useState<ReportPeriodOption>('thisMonth');
-  const [fromDate, setFromDate] = useState<string>(() => {
-    const d = new Date();
-    return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0];
-  });
-  const [toDate, setToDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [fromDate, setFromDate] = useState<string>(() => getArgentinaFirstOfMonth());
+  const [toDate, setToDate] = useState<string>(() => getArgentinaToday());
 
   // Main Report State
   const [report, setReport] = useState<FullBusinessReport | null>(null);
@@ -68,6 +74,38 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ products, onNavigate }
     bestCost: PurchaseItem | null;
   } | null>(null);
   const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
+
+  // Detail modal states
+  const [selectedPurchaseIdForDetail, setSelectedPurchaseIdForDetail] = useState<string | null>(null);
+  const [selectedCustomerForDetail, setSelectedCustomerForDetail] = useState<Customer | null>(null);
+  const [showSalesHistory, setShowSalesHistory] = useState<boolean>(false);
+
+  const handleOpenCustomerDetail = async (customerId: string, customerName?: string) => {
+    try {
+      const cust = await customerService.getCustomerById(customerId);
+      if (cust) {
+        setSelectedCustomerForDetail(cust);
+      } else {
+        setSelectedCustomerForDetail({
+          id: customerId,
+          name: customerName || 'Cliente',
+          phone: '',
+          notes: '',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+      }
+    } catch {
+      setSelectedCustomerForDetail({
+        id: customerId,
+        name: customerName || 'Cliente',
+        phone: '',
+        notes: '',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+    }
+  };
 
   // Load report data
   const loadReport = useCallback(async () => {
@@ -166,14 +204,25 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ products, onNavigate }
           </div>
         </div>
 
-        <button
-          onClick={loadReport}
-          disabled={loading}
-          className="self-start md:self-auto px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold border border-slate-700 flex items-center gap-2 transition-all active:scale-95 disabled:opacity-50"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          <span>Actualizar Datos</span>
-        </button>
+        <div className="flex items-center gap-2 self-start md:self-auto">
+          <button
+            onClick={() => setShowSalesHistory(true)}
+            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 rounded-xl text-xs font-bold border border-slate-200 flex items-center gap-2 transition-all"
+            title="Consultar historial completo de ventas"
+          >
+            <History className="w-4 h-4 text-emerald-600" />
+            <span>Historial Ventas</span>
+          </button>
+
+          <button
+            onClick={loadReport}
+            disabled={loading}
+            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold border border-slate-700 flex items-center gap-2 transition-all active:scale-95 disabled:opacity-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            <span>Actualizar Datos</span>
+          </button>
+        </div>
       </div>
 
       {/* FILTER BAR */}
@@ -606,15 +655,39 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ products, onNavigate }
                         <th className="py-2 px-3">Costo Unitario</th>
                         <th className="py-2 px-3">Cantidad Comprada</th>
                         <th className="py-2 px-3">Fecha</th>
+                        <th className="py-2 px-3 text-right">Comprobante</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-xs">
                       {costHistory.items.map((item) => (
-                        <tr key={item.id} className="hover:bg-slate-50 font-semibold text-slate-800">
+                        <tr 
+                          key={item.id} 
+                          onClick={() => {
+                            if (item.purchaseId) {
+                              setSelectedPurchaseIdForDetail(item.purchaseId);
+                            }
+                          }}
+                          className={`hover:bg-slate-50 font-semibold text-slate-800 ${item.purchaseId ? 'cursor-pointer' : ''}`}
+                          title={item.purchaseId ? 'Hacé clic para ver el comprobante y detalle de compra' : undefined}
+                        >
                           <td className="py-2.5 px-3">{item.providerName}</td>
                           <td className="py-2.5 px-3 font-bold text-slate-900">${item.unitCost.toLocaleString('es-AR')}</td>
                           <td className="py-2.5 px-3 text-slate-600">{item.quantity} u.</td>
-                          <td className="py-2.5 px-3 text-slate-500">{new Date(item.purchaseDate).toLocaleDateString('es-AR')}</td>
+                          <td className="py-2.5 px-3 text-slate-500">{formatLocalDate(item.purchaseDate)}</td>
+                          <td className="py-2.5 px-3 text-right">
+                            {item.purchaseId && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedPurchaseIdForDetail(item.purchaseId);
+                                }}
+                                className="px-2 py-1 text-slate-600 hover:text-emerald-700 bg-white hover:bg-emerald-50 border border-slate-200 hover:border-emerald-200 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 shadow-2xs transition-colors"
+                              >
+                                <Eye className="w-3 h-3 text-emerald-600" />
+                                <span>Ver compra</span>
+                              </button>
+                            )}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -714,9 +787,20 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ products, onNavigate }
               ) : (
                 <div className="space-y-1.5">
                   {report.customerDebt.topDebtors.map((deb) => (
-                    <div key={deb.customerId} className="p-2.5 bg-slate-50 rounded-xl flex items-center justify-between text-xs">
-                      <span className="font-bold text-slate-800">{deb.customerName}</span>
-                      <span className="font-black text-purple-900">${deb.currentDebt.toLocaleString('es-AR')}</span>
+                    <div 
+                      key={deb.customerId} 
+                      onClick={() => handleOpenCustomerDetail(deb.customerId, deb.customerName)}
+                      className="p-2.5 bg-slate-50 hover:bg-purple-50/60 hover:border-purple-200 border border-transparent rounded-xl flex items-center justify-between text-xs cursor-pointer transition-all group"
+                      title="Hacé clic para ver el estado de cuenta y ficha de este cliente"
+                    >
+                      <span className="font-bold text-slate-800 group-hover:text-purple-900 transition-colors flex items-center gap-1.5">
+                        <User className="w-3.5 h-3.5 text-purple-600" />
+                        <span>{deb.customerName}</span>
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-black text-purple-900">${deb.currentDebt.toLocaleString('es-AR')}</span>
+                        <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-purple-600" />
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -800,6 +884,31 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ products, onNavigate }
             </div>
           </div>
         </>
+      )}
+
+      {/* DETAIL MODALS */}
+      {selectedPurchaseIdForDetail && (
+        <PurchaseDetailModal
+          purchaseId={selectedPurchaseIdForDetail}
+          onClose={() => setSelectedPurchaseIdForDetail(null)}
+          onOperationCancelled={loadReport}
+        />
+      )}
+
+      {selectedCustomerForDetail && (
+        <CustomerDetailModal
+          customer={selectedCustomerForDetail}
+          onClose={() => setSelectedCustomerForDetail(null)}
+          onEditCustomer={() => {}}
+        />
+      )}
+
+      {showSalesHistory && (
+        <SalesHistoryModal
+          isOpen={showSalesHistory}
+          onClose={() => setShowSalesHistory(false)}
+          onSaleCancelled={loadReport}
+        />
       )}
     </div>
   );

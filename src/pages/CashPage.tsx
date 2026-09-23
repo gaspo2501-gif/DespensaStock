@@ -8,6 +8,21 @@ import {
 } from '../types/cash';
 import { cashService } from '../services/firebase/cashService';
 import { NumericInput } from '../components/common/NumericInput';
+import { CashMovementDetailModal } from '../components/modals/CashMovementDetailModal';
+import { CashClosureDetailModal } from '../components/modals/CashClosureDetailModal';
+import { SaleDetailModal } from '../components/modals/SaleDetailModal';
+import { ExpenseDetailModal } from '../components/modals/ExpenseDetailModal';
+import { PaymentDetailModal } from '../components/modals/PaymentDetailModal';
+import { 
+  formatLocalDate, 
+  formatLocalDateTime,
+  toArgentinaDateString, 
+  getArgentinaToday, 
+  getArgentinaYesterday, 
+  getArgentinaDaysAgo, 
+  getArgentinaFirstOfMonth 
+} from '../utils/dateUtils';
+import { ExpensesPage } from './ExpensesPage';
 import { 
   Wallet, 
   Plus, 
@@ -31,10 +46,18 @@ import {
   ArrowUpRight, 
   ArrowDownRight,
   ChevronRight,
-  PieChart
+  PieChart,
+  ExternalLink,
+  ArrowLeftRight,
+  Receipt
 } from 'lucide-react';
 
-export const CashPage: React.FC = () => {
+interface CashPageProps {
+  initialSubTab?: 'movements' | 'expenses' | 'closures';
+}
+
+export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' }) => {
+  const [activeSubTab, setActiveSubTab] = useState<'movements' | 'expenses' | 'closures'>(initialSubTab);
   const [summary, setSummary] = useState<CashBalanceSummary>({
     cashBalance: 0,
     mercadoPagoBalance: 0,
@@ -60,6 +83,11 @@ export const CashPage: React.FC = () => {
   const [showInitialModal, setShowInitialModal] = useState<boolean>(false);
   const [showClosureModal, setShowClosureModal] = useState<boolean>(false);
   const [showClosureHistory, setShowClosureHistory] = useState<boolean>(false);
+  const [selectedMovementForDetail, setSelectedMovementForDetail] = useState<CashMovement | null>(null);
+  const [selectedClosureForDetail, setSelectedClosureForDetail] = useState<CashClosure | null>(null);
+  const [linkedSaleId, setLinkedSaleId] = useState<string | null>(null);
+  const [linkedExpenseId, setLinkedExpenseId] = useState<string | null>(null);
+  const [linkedPaymentId, setLinkedPaymentId] = useState<string | null>(null);
 
   // Feedback message
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -69,13 +97,13 @@ export const CashPage: React.FC = () => {
   const [movDescription, setMovDescription] = useState<string>('');
   const [movAmountStr, setMovAmountStr] = useState<string>('');
   const [movMethod, setMovMethod] = useState<CashPaymentMethod>('cash');
-  const [movDate, setMovDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [movDate, setMovDate] = useState<string>(getArgentinaToday());
   const [movNotes, setMovNotes] = useState<string>('');
   const [isSubmittingMov, setIsSubmittingMov] = useState<boolean>(false);
 
   // Form states for initial balance
   const [initialAmountStr, setInitialAmountStr] = useState<string>('');
-  const [initialDate, setInitialDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [initialDate, setInitialDate] = useState<string>(getArgentinaToday());
   const [initialNotes, setInitialNotes] = useState<string>('');
   const [isSubmittingInitial, setIsSubmittingInitial] = useState<boolean>(false);
 
@@ -203,26 +231,18 @@ export const CashPage: React.FC = () => {
 
   // Filtered movements calculation
   const filteredMovements = useMemo(() => {
-    const now = new Date();
-    const todayStr = now.toISOString().split('T')[0];
-
-    const yesterday = new Date(now);
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = yesterday.toISOString().split('T')[0];
-
-    // Get date 7 days ago
-    const weekAgo = new Date(now);
-    weekAgo.setDate(weekAgo.getDate() - 7);
-
-    // Get date 1st of month
-    const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const todayStr = getArgentinaToday();
+    const yesterdayStr = getArgentinaYesterday();
+    const weekAgoStr = getArgentinaDaysAgo(7);
+    const firstOfMonthStr = getArgentinaFirstOfMonth();
 
     return movements.filter((mov) => {
-      // 1. Period filter
-      if (periodFilter === 'today' && mov.date !== todayStr) return false;
-      if (periodFilter === 'yesterday' && mov.date !== yesterdayStr) return false;
-      if (periodFilter === 'week' && new Date(mov.date) < weekAgo) return false;
-      if (periodFilter === 'month' && new Date(mov.date) < firstOfMonth) return false;
+      // 1. Period filter (always using Argentina calendar date)
+      const movDate = mov.date || toArgentinaDateString(mov.createdAt) || todayStr;
+      if (periodFilter === 'today' && movDate !== todayStr) return false;
+      if (periodFilter === 'yesterday' && movDate !== yesterdayStr) return false;
+      if (periodFilter === 'week' && movDate < weekAgoStr) return false;
+      if (periodFilter === 'month' && movDate < firstOfMonthStr) return false;
 
       // 2. Method filter
       if (methodFilter !== 'all' && mov.paymentMethod !== methodFilter) return false;
@@ -337,6 +357,45 @@ export const CashPage: React.FC = () => {
         </div>
       </div>
 
+      {/* SUB-NAVIGATION TABS: Movimientos | Gastos | Cierres */}
+      <div className="flex items-center gap-2 p-1.5 bg-white border border-slate-200 rounded-2xl shadow-2xs">
+        <button
+          onClick={() => setActiveSubTab('movements')}
+          className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+            activeSubTab === 'movements'
+              ? 'bg-emerald-600 text-white shadow-sm'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+          }`}
+        >
+          <ArrowLeftRight className="w-4 h-4" />
+          <span>Movimientos</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('expenses')}
+          className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+            activeSubTab === 'expenses'
+              ? 'bg-rose-600 text-white shadow-sm'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+          }`}
+        >
+          <Receipt className="w-4 h-4" />
+          <span>Gastos</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('closures')}
+          className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+            activeSubTab === 'closures'
+              ? 'bg-indigo-600 text-white shadow-sm'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+          }`}
+        >
+          <Lock className="w-4 h-4" />
+          <span>Cierres ({closures.length})</span>
+        </button>
+      </div>
+
       {/* Feedback Alert */}
       {feedback && (
         <div
@@ -359,6 +418,116 @@ export const CashPage: React.FC = () => {
           </button>
         </div>
       )}
+
+      {/* SUB-TAB 2: GASTOS EMBEDDED */}
+      {activeSubTab === 'expenses' && (
+        <div className="animate-fadeIn">
+          <ExpensesPage isEmbedded={true} onBackToHome={() => setActiveSubTab('movements')} />
+        </div>
+      )}
+
+      {/* SUB-TAB 3: CIERRES DIRECT VIEW */}
+      {activeSubTab === 'closures' && (
+        <div className="space-y-4 animate-fadeIn">
+          <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-2xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+                  <Lock className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900">Arqueos y Cierres de Caja</h2>
+                  <p className="text-xs text-slate-500">Historial completo de arqueos y balances finales</p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => {
+                  setCountedCashStr(summary.cashBalance.toString());
+                  setShowClosureModal(true);
+                }}
+                className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 self-start sm:self-auto"
+              >
+                <Lock className="w-4 h-4" />
+                <span>Realizar Cierre de Caja</span>
+              </button>
+            </div>
+
+            {closures.length === 0 ? (
+              <div className="py-12 text-center space-y-2">
+                <Lock className="w-10 h-10 text-slate-300 mx-auto" />
+                <p className="text-sm font-bold text-slate-700">Sin cierres de caja registrados</p>
+                <p className="text-xs text-slate-400">
+                  Al pulsar "Realizar Cierre de Caja" los arqueos quedarán asentados aquí.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                {closures.map((c) => {
+                  const dateFormatted = formatLocalDateTime(c.createdAt || c.date);
+
+                  return (
+                    <div
+                      key={c.id}
+                      onClick={() => setSelectedClosureForDetail(c)}
+                      className="p-4 bg-slate-50 hover:bg-white border border-slate-200 hover:border-indigo-300 rounded-2xl space-y-2.5 shadow-2xs hover:shadow-xs transition-all cursor-pointer group"
+                      title="Hacé clic para ver el arqueo detallado"
+                    >
+                      <div className="flex items-center justify-between border-b border-slate-200/80 pb-2">
+                        <span className="text-xs font-bold text-slate-700 group-hover:text-indigo-700 font-mono transition-colors">{dateFormatted}</span>
+                        {c.status === 'CANCELLED' ? (
+                          <span className="text-[10px] font-extrabold text-rose-700 bg-rose-100/80 px-2 py-0.5 rounded-md">
+                            ANULADO
+                          </span>
+                        ) : c.difference === 0 ? (
+                          <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md">
+                            Exacta
+                          </span>
+                        ) : c.difference > 0 ? (
+                          <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md font-mono">
+                            Sobrante +${c.difference.toLocaleString('es-AR')}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-extrabold text-rose-800 bg-rose-100 px-2 py-0.5 rounded-md font-mono">
+                            Faltante -${Math.abs(c.difference).toLocaleString('es-AR')}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                        <div>
+                          <span className="text-[10px] font-sans text-slate-400 uppercase font-extrabold block">Esperado</span>
+                          <span className="font-bold text-slate-900">${c.expectedCash.toLocaleString('es-AR')}</span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] font-sans text-slate-400 uppercase font-extrabold block">Contado</span>
+                          <span className="font-bold text-slate-900">${c.countedCash.toLocaleString('es-AR')}</span>
+                        </div>
+                      </div>
+
+                      <div className="pt-2 border-t border-slate-200/50 flex items-center justify-between">
+                        {c.notes ? (
+                          <p className="text-[11px] text-slate-500 italic truncate max-w-[200px]">
+                            {c.notes}
+                          </p>
+                        ) : <span />}
+                        <span className="text-[10px] font-bold text-indigo-600 group-hover:underline flex items-center gap-0.5 ml-auto">
+                          <span>Ver arqueo</span>
+                          <ChevronRight className="w-3 h-3" />
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* SUB-TAB 1: MOVIMIENTOS & BALANCES VIEW */}
+      {activeSubTab === 'movements' && (
+        <div className="space-y-6 animate-fadeIn">
 
       {/* Main Balances Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
@@ -435,7 +604,7 @@ export const CashPage: React.FC = () => {
             <h2 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">Resumen del Día (Hoy)</h2>
           </div>
           <span className="text-xs font-bold text-slate-400 font-mono">
-            {new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })}
+            {formatLocalDate(getArgentinaToday())}
           </span>
         </div>
 
@@ -582,7 +751,9 @@ export const CashPage: React.FC = () => {
               return (
                 <div
                   key={mov.id}
-                  className="p-3.5 bg-slate-50/70 border border-slate-200/80 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-white hover:border-slate-300 transition-all shadow-2xs"
+                  onClick={() => setSelectedMovementForDetail(mov)}
+                  className="p-3.5 bg-slate-50/70 border border-slate-200/80 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-white hover:border-emerald-300 hover:shadow-xs transition-all shadow-2xs cursor-pointer group"
+                  title="Hacé clic para ver el detalle completo de este movimiento"
                 >
                   <div className="flex items-center gap-3">
                     {/* Icon indicator */}
@@ -596,22 +767,26 @@ export const CashPage: React.FC = () => {
 
                     <div className="space-y-0.5">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-bold text-sm text-slate-900">{mov.description}</span>
+                        <span className="font-bold text-sm text-slate-900 group-hover:text-emerald-700 transition-colors">{mov.description}</span>
                         {renderSourceBadge(mov.sourceType)}
                         {renderMethodBadge(mov.paymentMethod)}
                       </div>
 
                       <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono">
-                        <span>{mov.date}</span>
+                        <span>{formatLocalDateTime(mov.createdAt || mov.date)}</span>
                         {mov.notes && <span>• {mov.notes}</span>}
                       </div>
                     </div>
                   </div>
 
-                  <div className="text-right shrink-0">
+                  <div className="flex items-center sm:flex-col sm:items-end justify-between gap-1 shrink-0">
                     <p className={`text-base font-black font-mono ${isIncome ? 'text-emerald-700' : 'text-rose-600'}`}>
                       {isIncome ? '+' : '-'}${mov.amount.toLocaleString('es-AR')}
                     </p>
+                    <span className="text-[10px] text-slate-400 font-bold group-hover:text-emerald-600 flex items-center gap-0.5 transition-colors">
+                      <span>Ver detalle</span>
+                      <ChevronRight className="w-3 h-3" />
+                    </span>
                   </div>
                 </div>
               );
@@ -619,6 +794,8 @@ export const CashPage: React.FC = () => {
           </div>
         )}
       </div>
+    </div>
+  )}
 
       {/* Modal 1: + Movimiento Manual */}
       {showManualModal && (
@@ -1058,18 +1235,17 @@ export const CashPage: React.FC = () => {
                 </div>
               ) : (
                 closures.map((c) => {
-                  const dateFormatted = new Date(c.createdAt).toLocaleString('es-AR', {
-                    dateStyle: 'medium',
-                    timeStyle: 'short',
-                  });
+                  const dateFormatted = formatLocalDateTime(c.createdAt || c.date);
 
                   return (
                     <div
                       key={c.id}
-                      className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-2 shadow-2xs"
+                      onClick={() => setSelectedClosureForDetail(c)}
+                      className="p-4 bg-slate-50 hover:bg-white border border-slate-200 hover:border-indigo-300 rounded-2xl space-y-2 shadow-2xs hover:shadow-xs transition-all cursor-pointer group"
+                      title="Hacé clic para ver el arqueo detallado"
                     >
                       <div className="flex items-center justify-between border-b border-slate-200/80 pb-2">
-                        <span className="text-xs font-bold text-slate-700 font-mono">{dateFormatted}</span>
+                        <span className="text-xs font-bold text-slate-700 group-hover:text-indigo-700 font-mono transition-colors">{dateFormatted}</span>
                         {c.difference === 0 ? (
                           <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md">
                             Exacta
@@ -1096,11 +1272,17 @@ export const CashPage: React.FC = () => {
                         </div>
                       </div>
 
-                      {c.notes && (
-                        <p className="text-[11px] text-slate-500 italic pt-1 border-t border-slate-200/50">
-                          {c.notes}
-                        </p>
-                      )}
+                      <div className="pt-2 border-t border-slate-200/50 flex items-center justify-between">
+                        {c.notes ? (
+                          <p className="text-[11px] text-slate-500 italic truncate max-w-[200px]">
+                            {c.notes}
+                          </p>
+                        ) : <span />}
+                        <span className="text-[10px] font-bold text-indigo-600 group-hover:underline flex items-center gap-0.5 ml-auto">
+                          <span>Ver arqueo</span>
+                          <ChevronRight className="w-3 h-3" />
+                        </span>
+                      </div>
                     </div>
                   );
                 })
@@ -1117,6 +1299,54 @@ export const CashPage: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* CASH MOVEMENT DETAIL MODAL */}
+      {selectedMovementForDetail && (
+        <CashMovementDetailModal
+          movement={selectedMovementForDetail}
+          onClose={() => setSelectedMovementForDetail(null)}
+          onOpenSaleDetail={(saleId) => setLinkedSaleId(saleId)}
+          onOpenExpenseDetail={(expenseId) => setLinkedExpenseId(expenseId)}
+          onOpenPaymentDetail={(paymentId) => setLinkedPaymentId(paymentId)}
+          onOperationCancelled={loadData}
+        />
+      )}
+
+      {/* CASH CLOSURE DETAIL MODAL */}
+      {selectedClosureForDetail && (
+        <CashClosureDetailModal
+          closure={selectedClosureForDetail}
+          onClose={() => setSelectedClosureForDetail(null)}
+          onOperationCancelled={loadData}
+        />
+      )}
+
+      {/* LINKED SALE DETAIL MODAL */}
+      {linkedSaleId && (
+        <SaleDetailModal
+          saleId={linkedSaleId}
+          onClose={() => setLinkedSaleId(null)}
+          onOperationCancelled={loadData}
+        />
+      )}
+
+      {/* LINKED EXPENSE DETAIL MODAL */}
+      {linkedExpenseId && (
+        <ExpenseDetailModal
+          expenseId={linkedExpenseId}
+          onClose={() => setLinkedExpenseId(null)}
+          onOperationCancelled={loadData}
+        />
+      )}
+
+      {/* LINKED PAYMENT DETAIL MODAL */}
+      {linkedPaymentId && (
+        <PaymentDetailModal
+          movementId={linkedPaymentId}
+          onClose={() => setLinkedPaymentId(null)}
+          onOperationCancelled={loadData}
+        />
       )}
     </div>
   );

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { NavigationTab, Product, CreateProductInput } from './types/product';
 import { productService } from './services/firebase/productService';
 import { Navbar } from './components/layout/Navbar';
+import { Sidebar } from './components/layout/Sidebar';
 import { BottomNav } from './components/layout/BottomNav';
 import { Home } from './pages/Home';
 import { ScanPage } from './pages/ScanPage';
@@ -45,6 +46,16 @@ export default function App() {
 
   useEffect(() => {
     fetchProducts();
+
+    // Real-time listener: guarantees immediate stock and product updates across the entire app
+    const unsubscribe = productService.subscribeToProducts((liveProducts) => {
+      setProducts(liveProducts);
+      setLoading(false);
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, [fetchProducts]);
 
   // Handlers
@@ -100,115 +111,114 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col text-slate-900 font-sans selection:bg-emerald-500 selection:text-white">
-      {/* Top Navbar */}
-      <Navbar />
+    <div className="min-h-screen bg-slate-100 flex flex-col md:flex-row text-slate-900 font-sans selection:bg-emerald-500 selection:text-white">
+      {/* Desktop Compact Sidebar (Visible on md and above) */}
+      <div className="hidden md:flex shrink-0">
+        <Sidebar currentTab={currentTab} onSelectTab={setCurrentTab} />
+      </div>
 
-      {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 pb-24">
-        {loading && products.length === 0 ? (
-          <div className="py-20 flex flex-col items-center justify-center text-center space-y-3">
-            <Loader2 className="w-10 h-10 text-emerald-600 animate-spin" />
-            <p className="text-sm font-semibold text-slate-700">Cargando tu catálogo de Despensa Stock...</p>
-            <p className="text-xs text-slate-400">Conectando a base de datos en Firebase</p>
-          </div>
-        ) : error && products.length === 0 ? (
-          <div className="py-12 px-6 bg-white border border-rose-200 rounded-3xl text-center max-w-md mx-auto space-y-4 shadow-sm">
-            <div className="w-12 h-12 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center mx-auto">
-              <AlertCircle className="w-6 h-6" />
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Mobile Top Navbar (Hidden on md and above) */}
+        <div className="md:hidden">
+          <Navbar />
+        </div>
+
+        {/* Content Container */}
+        <main className="flex-1 max-w-6xl w-full mx-auto p-3 sm:p-5 pb-24 md:pb-8">
+          {loading && products.length === 0 ? (
+            <div className="py-20 flex flex-col items-center justify-center text-center space-y-3">
+              <Loader2 className="w-10 h-10 text-emerald-600 animate-spin" />
+              <p className="text-sm font-semibold text-slate-700">Cargando tu catálogo de Despensa Stock...</p>
+              <p className="text-xs text-slate-400">Conectando a base de datos en Firebase</p>
             </div>
-            <div>
-              <h3 className="text-base font-bold text-slate-900">Error de conexión</h3>
-              <p className="text-xs text-slate-500 mt-1">{error}</p>
+          ) : error && products.length === 0 ? (
+            <div className="py-12 px-6 bg-white border border-rose-200 rounded-3xl text-center max-w-md mx-auto space-y-4 shadow-sm">
+              <div className="w-12 h-12 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center mx-auto">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Error de conexión</h3>
+                <p className="text-xs text-slate-500 mt-1">{error}</p>
+              </div>
+              <button
+                onClick={fetchProducts}
+                className="py-2.5 px-5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-xl inline-flex items-center gap-2"
+              >
+                <RefreshCw className="w-4 h-4" /> Reintentar
+              </button>
             </div>
-            <button
-              onClick={fetchProducts}
-              className="py-2.5 px-5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-xl inline-flex items-center gap-2"
-            >
-              <RefreshCw className="w-4 h-4" /> Reintentar
-            </button>
-          </div>
-        ) : (
-          <>
-            {/* Tab Views */}
-            {currentTab === 'home' && (
-              <Home
-                onNavigate={setCurrentTab}
-                products={products}
-                onSelectProduct={setSelectedProduct}
-                onManualAdd={() => setShowManualForm(true)}
-              />
-            )}
+          ) : (
+            <>
+              {/* Core 6 Views & Backward Compatibility */}
+              {currentTab === 'home' && (
+                <Home
+                  onNavigate={setCurrentTab}
+                  products={products}
+                  onSelectProduct={setSelectedProduct}
+                  onManualAdd={() => setShowManualForm(true)}
+                />
+              )}
 
-            {currentTab === 'scan' && (
-              <ScanPage
-                products={products}
-                onProductsUpdated={handleProductsBatchUpdated}
-                onProductSaved={handleProductSaved}
-                onBackToHome={() => setCurrentTab('home')}
-              />
-            )}
+              {currentTab === 'sales' && (
+                <SalesPage
+                  products={products}
+                  onProductsUpdated={handleProductsBatchUpdated}
+                  onNavigateToScan={() => setCurrentTab('stock')}
+                  onNavigateHome={() => setCurrentTab('home')}
+                />
+              )}
 
-            {currentTab === 'stock' && (
-              <StockPage
-                products={products}
-                onProductsUpdated={handleProductsBatchUpdated}
-                onProductSaved={handleProductSaved}
-                onBackToHome={() => setCurrentTab('home')}
-              />
-            )}
+              {(currentTab === 'stock' || currentTab === 'scan') && (
+                <StockPage
+                  products={products}
+                  onProductsUpdated={handleProductsBatchUpdated}
+                  onProductSaved={handleProductSaved}
+                  onBackToHome={() => setCurrentTab('home')}
+                />
+              )}
 
-            {currentTab === 'search' && (
-              <SearchPage
-                products={products}
-                onSelectProduct={setSelectedProduct}
-                onEditProduct={(p) => setEditingProduct(p)}
-                onDeleteProduct={handleDeleteProduct}
-              />
-            )}
+              {currentTab === 'customers' && (
+                <CustomersPage />
+              )}
 
-            {currentTab === 'sales' && (
-              <SalesPage
-                products={products}
-                onProductsUpdated={handleProductsBatchUpdated}
-                onNavigateToScan={() => setCurrentTab('scan')}
-                onNavigateHome={() => setCurrentTab('home')}
-              />
-            )}
+              {currentTab === 'cash' && (
+                <CashPage initialSubTab="movements" />
+              )}
 
-            {currentTab === 'list' && (
-              <ProductListPage
-                products={products}
-                onSelectProduct={setSelectedProduct}
-                onEditProduct={(p) => setEditingProduct(p)}
-                onDeleteProduct={handleDeleteProduct}
-                onAddNewProduct={() => setShowManualForm(true)}
-              />
-            )}
+              {currentTab === 'expenses' && (
+                <CashPage initialSubTab="expenses" />
+              )}
 
-            {currentTab === 'customers' && (
-              <CustomersPage />
-            )}
+              {currentTab === 'reports' && (
+                <ReportsPage
+                  products={products}
+                  onNavigate={setCurrentTab}
+                />
+              )}
 
-            {currentTab === 'expenses' && (
-              <ExpensesPage
-                onBackToHome={() => setCurrentTab('home')}
-              />
-            )}
+              {/* Legacy fallback routes for search and list */}
+              {currentTab === 'search' && (
+                <SearchPage
+                  products={products}
+                  onSelectProduct={setSelectedProduct}
+                  onEditProduct={(p) => setEditingProduct(p)}
+                  onDeleteProduct={handleDeleteProduct}
+                />
+              )}
 
-            {currentTab === 'cash' && (
-              <CashPage />
-            )}
-
-            {currentTab === 'reports' && (
-              <ReportsPage
-                products={products}
-                onNavigate={setCurrentTab}
-              />
-            )}
-          </>
-        )}
-      </main>
+              {currentTab === 'list' && (
+                <StockPage
+                  products={products}
+                  onProductsUpdated={handleProductsBatchUpdated}
+                  onProductSaved={handleProductSaved}
+                  onBackToHome={() => setCurrentTab('home')}
+                />
+              )}
+            </>
+          )}
+        </main>
+      </div>
 
       {/* Product Detail Sheet Modal */}
       {selectedProduct && (
@@ -223,7 +233,7 @@ export default function App() {
           onProductUpdated={handleProductSaved}
           onScanAnother={() => {
             setSelectedProduct(null);
-            setCurrentTab('scan');
+            setCurrentTab('stock');
           }}
         />
       )}
@@ -253,7 +263,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Mobile Bottom Navigation Bar */}
+      {/* Mobile Bottom Navigation Bar (Hidden on desktop) */}
       <BottomNav
         currentTab={currentTab}
         onSelectTab={setCurrentTab}

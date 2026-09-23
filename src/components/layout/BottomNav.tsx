@@ -1,103 +1,65 @@
 import React from 'react';
 import { NavigationTab } from '../../types/product';
-import { Home, Package, Users, ShoppingCart, Boxes, Receipt, Wallet, BarChart3 } from 'lucide-react';
+import { Home, Users, ShoppingCart, Boxes, Wallet, BarChart3 } from 'lucide-react';
 
 interface BottomNavProps {
   currentTab: NavigationTab;
   onSelectTab: (tab: NavigationTab) => void;
 }
 
+interface NavItem {
+  id: NavigationTab;
+  label: string;
+  icon: React.ElementType;
+}
+
+const NAV_ITEMS: NavItem[] = [
+  { id: 'home', label: 'Inicio', icon: Home },
+  { id: 'sales', label: 'Venta', icon: ShoppingCart },
+  { id: 'stock', label: 'Stock', icon: Boxes },
+  { id: 'customers', label: 'Clientes', icon: Users },
+  { id: 'cash', label: 'Caja', icon: Wallet },
+  { id: 'reports', label: 'Reportes', icon: BarChart3 },
+];
+
 export const BottomNav: React.FC<BottomNavProps> = ({ currentTab, onSelectTab }) => {
+  // Normalize legacy/internal sub-tabs
+  const getActiveTab = (): NavigationTab => {
+    if (currentTab === 'list' || currentTab === 'search' || currentTab === 'scan') return 'stock';
+    if (currentTab === 'expenses') return 'cash';
+    return currentTab;
+  };
+
+  const activeTab = getActiveTab();
+
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/80 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] px-1 py-1.5">
-      <div className="max-w-xl mx-auto flex items-center justify-between text-center overflow-x-auto no-scrollbar gap-1">
-        {/* Home Tab */}
-        <button
-          onClick={() => onSelectTab('home')}
-          className={`flex flex-col items-center gap-1 transition-colors py-1 px-1.5 shrink-0 ${
-            currentTab === 'home' ? 'text-emerald-700 font-bold' : 'text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <Home className={`w-5 h-5 ${currentTab === 'home' ? 'stroke-[2.5]' : ''}`} />
-          <span className="text-[10px]">Inicio</span>
-        </button>
+    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/80 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] px-2 py-1.5 safe-area-pb">
+      <div className="max-w-md mx-auto grid grid-cols-6 items-center text-center">
+        {NAV_ITEMS.map((item) => {
+          const Icon = item.icon;
+          const isActive = activeTab === item.id;
 
-        {/* Sales / Cart Tab */}
-        <button
-          onClick={() => onSelectTab('sales')}
-          className={`flex flex-col items-center gap-1 transition-colors py-1 px-1.5 shrink-0 ${
-            currentTab === 'sales' ? 'text-emerald-700 font-bold' : 'text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <ShoppingCart className={`w-5 h-5 ${currentTab === 'sales' ? 'stroke-[2.5]' : ''}`} />
-          <span className="text-[10px]">Venta</span>
-        </button>
-
-        {/* Caja Tab */}
-        <button
-          onClick={() => onSelectTab('cash')}
-          className={`flex flex-col items-center gap-1 transition-colors py-1 px-1.5 shrink-0 ${
-            currentTab === 'cash' ? 'text-emerald-700 font-bold' : 'text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <Wallet className={`w-5 h-5 ${currentTab === 'cash' ? 'stroke-[2.5]' : ''}`} />
-          <span className="text-[10px]">Caja</span>
-        </button>
-
-        {/* Reportes Tab */}
-        <button
-          onClick={() => onSelectTab('reports')}
-          className={`flex flex-col items-center gap-1 transition-colors py-1 px-1.5 shrink-0 ${
-            currentTab === 'reports' ? 'text-emerald-700 font-bold' : 'text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <BarChart3 className={`w-5 h-5 ${currentTab === 'reports' ? 'stroke-[2.5]' : ''}`} />
-          <span className="text-[10px]">Reportes</span>
-        </button>
-
-        {/* Stock Tab */}
-        <button
-          onClick={() => onSelectTab('stock')}
-          className={`flex flex-col items-center gap-1 transition-colors py-1 px-1.5 shrink-0 ${
-            currentTab === 'stock' ? 'text-emerald-700 font-bold' : 'text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <Boxes className={`w-5 h-5 ${currentTab === 'stock' ? 'stroke-[2.5]' : ''}`} />
-          <span className="text-[10px]">Stock</span>
-        </button>
-
-        {/* Expenses Tab */}
-        <button
-          onClick={() => onSelectTab('expenses')}
-          className={`flex flex-col items-center gap-1 transition-colors py-1 px-1.5 shrink-0 ${
-            currentTab === 'expenses' ? 'text-rose-700 font-bold' : 'text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <Receipt className={`w-5 h-5 ${currentTab === 'expenses' ? 'stroke-[2.5]' : ''}`} />
-          <span className="text-[10px]">Gastos</span>
-        </button>
-
-        {/* Customers Tab */}
-        <button
-          onClick={() => onSelectTab('customers')}
-          className={`flex flex-col items-center gap-1 transition-colors py-1 px-1.5 shrink-0 ${
-            currentTab === 'customers' ? 'text-emerald-700 font-bold' : 'text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <Users className={`w-5 h-5 ${currentTab === 'customers' ? 'stroke-[2.5]' : ''}`} />
-          <span className="text-[10px]">Clientes</span>
-        </button>
-
-        {/* Products List Tab */}
-        <button
-          onClick={() => onSelectTab('list')}
-          className={`flex flex-col items-center gap-1 transition-colors py-1 px-1.5 shrink-0 ${
-            currentTab === 'list' ? 'text-emerald-700 font-bold' : 'text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <Package className={`w-5 h-5 ${currentTab === 'list' ? 'stroke-[2.5]' : ''}`} />
-          <span className="text-[10px]">Catálogo</span>
-        </button>
+          return (
+            <button
+              key={item.id}
+              onClick={() => onSelectTab(item.id)}
+              className={`flex flex-col items-center justify-center gap-1 transition-all py-1 px-0.5 rounded-xl ${
+                isActive
+                  ? 'text-emerald-700 font-extrabold'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              <div className={`p-1 rounded-xl transition-colors ${
+                isActive ? 'bg-emerald-50 text-emerald-700' : 'text-slate-400'
+              }`}>
+                <Icon className={`w-5 h-5 ${isActive ? 'stroke-[2.5]' : ''}`} />
+              </div>
+              <span className={`text-[10px] tracking-tight ${isActive ? 'font-extrabold text-emerald-800' : 'font-medium'}`}>
+                {item.label}
+              </span>
+            </button>
+          );
+        })}
       </div>
     </nav>
   );

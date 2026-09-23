@@ -1,10 +1,12 @@
 import { 
   collection, 
   doc, 
+  getDoc,
   getDocs, 
   setDoc, 
   updateDoc, 
   deleteDoc,
+  runTransaction,
   query, 
   orderBy, 
   serverTimestamp 
@@ -21,6 +23,7 @@ import { LocationSelection } from '../../types/location';
 import { salesService } from './salesService';
 import { expenseService } from './expenseService';
 import { accountService } from './accountService';
+import { toArgentinaDateString, getArgentinaToday } from '../../utils/dateUtils';
 
 const CASH_MOVEMENTS_COLLECTION = 'cash_movements';
 const CASH_CLOSURES_COLLECTION = 'cash_closures';
@@ -85,7 +88,7 @@ export const cashService = {
       amount: input.amount,
       paymentMethod: input.paymentMethod || 'cash',
       description: input.description.trim(),
-      date: input.date || nowIso.split('T')[0],
+      date: input.date || toArgentinaDateString(nowIso) || getArgentinaToday(),
       sourceType: input.sourceType || 'MANUAL',
       sourceId: input.sourceId || movementId,
       locationId: targetLocationKey,
@@ -146,8 +149,8 @@ export const cashService = {
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
         let dateStr = data.date;
-        if (!dateStr && data.createdAtIso) {
-          dateStr = data.createdAtIso.split('T')[0];
+        if (!dateStr && (data.createdAtIso || data.createdAt)) {
+          dateStr = toArgentinaDateString(data.createdAtIso || data.createdAt);
         }
 
         const movLocation = data.locationId || 'aimogasta';
@@ -159,12 +162,15 @@ export const cashService = {
             amount: data.amount || 0,
             paymentMethod: data.paymentMethod || 'cash',
             description: data.description || '',
-            date: dateStr || new Date().toISOString().split('T')[0],
+            date: dateStr || getArgentinaToday(),
             sourceType: data.sourceType || 'MANUAL',
             sourceId: data.sourceId || docSnap.id,
             locationId: movLocation,
             notes: data.notes || '',
             createdAt: data.createdAtIso || (data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString()),
+            status: data.status || undefined,
+            cancelledAt: data.cancelledAtIso || (data.cancelledAt?.toDate ? data.cancelledAt.toDate().toISOString() : undefined),
+            cancellationReason: data.cancellationReason || undefined,
           });
         }
       });
@@ -199,7 +205,7 @@ export const cashService = {
 
         const key = getSourceKey('SALE', sale.id);
         if (!movementMap.has(key)) {
-          const saleDateStr = sale.createdAt ? sale.createdAt.split('T')[0] : new Date().toISOString().split('T')[0];
+          const saleDateStr = toArgentinaDateString(sale.createdAt) || getArgentinaToday();
           const synthMov: CashMovement = {
             id: `mov_cash_sale_${sale.id}`,
             type: 'INCOME',
@@ -212,6 +218,9 @@ export const cashService = {
             locationId: sale.locationId || 'aimogasta',
             notes: `${sale.totalItemsCount} ítems`,
             createdAt: sale.createdAt || new Date().toISOString(),
+            status: sale.status || undefined,
+            cancelledAt: sale.cancelledAt || undefined,
+            cancellationReason: sale.cancellationReason || undefined,
           };
           movementMap.set(key, synthMov);
         }
@@ -232,12 +241,15 @@ export const cashService = {
             amount: exp.amount,
             paymentMethod: exp.paymentMethod || 'cash',
             description: `${exp.category}: ${exp.description}`,
-            date: exp.date,
+            date: toArgentinaDateString(exp.date || exp.createdAt) || getArgentinaToday(),
             sourceType: 'EXPENSE',
             sourceId: exp.id,
             locationId: exp.locationId || 'aimogasta',
             notes: exp.notes || '',
             createdAt: exp.createdAt || new Date().toISOString(),
+            status: exp.status || undefined,
+            cancelledAt: exp.cancelledAt || undefined,
+            cancellationReason: exp.cancellationReason || undefined,
           };
           movementMap.set(key, synthMov);
         }
@@ -254,7 +266,7 @@ export const cashService = {
 
         const key = getSourceKey('CUSTOMER_PAYMENT', accMov.id);
         if (!movementMap.has(key)) {
-          const payDateStr = accMov.createdAt ? accMov.createdAt.split('T')[0] : new Date().toISOString().split('T')[0];
+          const payDateStr = toArgentinaDateString(accMov.createdAt) || getArgentinaToday();
           const synthMov: CashMovement = {
             id: `mov_cash_pay_${accMov.id}`,
             type: 'INCOME',
@@ -267,6 +279,9 @@ export const cashService = {
             locationId: accMov.locationId || 'aimogasta',
             notes: accMov.notes || '',
             createdAt: accMov.createdAt || new Date().toISOString(),
+            status: accMov.status || undefined,
+            cancelledAt: accMov.cancelledAt || undefined,
+            cancellationReason: accMov.cancellationReason || undefined,
           };
           movementMap.set(key, synthMov);
         }
@@ -301,7 +316,7 @@ export const cashService = {
       amount,
       paymentMethod: 'cash',
       description: 'Saldo inicial de caja',
-      date: date || new Date().toISOString().split('T')[0],
+      date: date || getArgentinaToday(),
       sourceType: 'MANUAL',
       sourceId: `initial_${Date.now()}`,
       locationId,
@@ -315,7 +330,7 @@ export const cashService = {
   async getCashSummary(locationId?: LocationSelection): Promise<CashBalanceSummary> {
     const movements = await this.getCashMovements(locationId);
 
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getArgentinaToday();
 
     let cashBalance = 0;
     let mercadoPagoBalance = 0;
@@ -326,6 +341,7 @@ export const cashService = {
     let todayExpense = 0;
 
     for (const mov of movements) {
+      if (mov.status === 'CANCELLED') continue; // Exclude cancelled movements from cash balances and totals
       const isIncome = mov.type === 'INCOME';
       const val = isIncome ? mov.amount : -mov.amount;
 
@@ -377,7 +393,7 @@ export const cashService = {
 
     const newClosure: CashClosure = {
       id: closureId,
-      date: nowIso.split('T')[0],
+      date: toArgentinaDateString(nowIso) || getArgentinaToday(),
       expectedCash,
       countedCash,
       difference,
@@ -425,13 +441,16 @@ export const cashService = {
         if (!locationId || locationId === 'all' || closureLoc === locationId) {
           closures.push({
             id: docSnap.id,
-            date: data.date || new Date().toISOString().split('T')[0],
+            date: data.date || toArgentinaDateString(data.createdAtIso || data.createdAt) || getArgentinaToday(),
             expectedCash: data.expectedCash || 0,
             countedCash: data.countedCash || 0,
             difference: data.difference || 0,
             locationId: closureLoc,
             notes: data.notes || '',
             createdAt: data.createdAtIso || (data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString()),
+            status: data.status || undefined,
+            cancelledAt: data.cancelledAtIso || (data.cancelledAt?.toDate ? data.cancelledAt.toDate().toISOString() : undefined),
+            cancellationReason: data.cancellationReason || undefined,
           });
         }
       });
@@ -444,6 +463,258 @@ export const cashService = {
       if (!locationId || locationId === 'all') return local;
       return local.filter(c => (c.locationId || 'aimogasta') === locationId);
     }
+  },
+
+  /**
+   * Cancel a manual cash movement atomically.
+   * Direct automatic movements (SALE, EXPENSE, CUSTOMER_PAYMENT) cannot be cancelled directly here,
+   * user must cancel the source document.
+   */
+  async cancelManualMovement(movementId: string, reason: string): Promise<CashMovement> {
+    if (!movementId) throw new Error('ID de movimiento no válido');
+    if (!reason?.trim()) throw new Error('Debe proporcionar un motivo de anulación');
+
+    const cleanReason = reason.trim();
+    const nowIso = new Date().toISOString();
+    const movRef = doc(db, CASH_MOVEMENTS_COLLECTION, movementId);
+
+    let returnedMov: CashMovement | null = null;
+
+    await runTransaction(db, async (transaction) => {
+      const snap = await transaction.get(movRef);
+      if (!snap.exists()) {
+        throw new Error(`No se encontró el movimiento de caja (${movementId})`);
+      }
+
+      const data = snap.data();
+      if (data.sourceType && data.sourceType !== 'MANUAL') {
+        const typeLabel = data.sourceType === 'SALE' ? 'Venta' : data.sourceType === 'EXPENSE' ? 'Gasto' : 'Cobro Fiado';
+        throw new Error(
+          `Este movimiento pertenece a una operación automática (${typeLabel}). Para anularlo, anulá la operación original correspondiente.`
+        );
+      }
+
+      if (data.status === 'CANCELLED') {
+        throw new Error('Este movimiento de caja ya fue anulado previamente.');
+      }
+
+      transaction.update(movRef, {
+        status: 'CANCELLED',
+        cancelledAt: serverTimestamp(),
+        cancelledAtIso: nowIso,
+        cancellationReason: cleanReason,
+      });
+
+      returnedMov = {
+        id: movementId,
+        type: data.type || 'INCOME',
+        amount: data.amount || 0,
+        paymentMethod: data.paymentMethod || 'cash',
+        description: data.description || '',
+        date: data.date || getArgentinaToday(),
+        sourceType: 'MANUAL',
+        sourceId: data.sourceId || movementId,
+        locationId: data.locationId || 'aimogasta',
+        notes: data.notes || '',
+        createdAt: data.createdAtIso || (data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : nowIso),
+        status: 'CANCELLED',
+        cancelledAt: nowIso,
+        cancellationReason: cleanReason,
+      };
+    });
+
+    if (returnedMov) {
+      const local = getLocalCashMovements();
+      const idx = local.findIndex(m => m.id === movementId);
+      if (idx >= 0) {
+        local[idx] = returnedMov;
+      } else {
+        local.unshift(returnedMov);
+      }
+      saveLocalCashMovements(local);
+    }
+
+    return returnedMov!;
+  },
+
+  /**
+   * Update a manual cash movement (concept, notes, payment method, date).
+   */
+  async updateManualMovement(
+    movementId: string, 
+    updates: { 
+      description?: string; 
+      notes?: string; 
+      paymentMethod?: CashPaymentMethod; 
+      date?: string;
+      amount?: number;
+    }
+  ): Promise<CashMovement> {
+    if (!movementId) throw new Error('ID de movimiento no válido');
+
+    const movRef = doc(db, CASH_MOVEMENTS_COLLECTION, movementId);
+    const snap = await getDoc(movRef);
+    if (!snap.exists()) {
+      throw new Error(`No se encontró el movimiento de caja (${movementId})`);
+    }
+
+    const data = snap.data();
+    if (data.sourceType && data.sourceType !== 'MANUAL') {
+      throw new Error('Sólo los movimientos manuales pueden ser editados directamente.');
+    }
+    if (data.status === 'CANCELLED') {
+      throw new Error('No se puede editar un movimiento que está anulado.');
+    }
+
+    const fsUpdates: Record<string, any> = {
+      updatedAt: serverTimestamp(),
+    };
+    if (updates.description !== undefined) fsUpdates.description = updates.description.trim();
+    if (updates.notes !== undefined) fsUpdates.notes = updates.notes.trim();
+    if (updates.paymentMethod !== undefined) fsUpdates.paymentMethod = updates.paymentMethod;
+    if (updates.date !== undefined) fsUpdates.date = updates.date;
+    if (updates.amount !== undefined && updates.amount > 0) fsUpdates.amount = updates.amount;
+
+    await updateDoc(movRef, fsUpdates);
+
+    const updatedMov: CashMovement = {
+      id: movementId,
+      type: data.type || 'INCOME',
+      amount: updates.amount !== undefined ? updates.amount : (data.amount || 0),
+      paymentMethod: updates.paymentMethod || data.paymentMethod || 'cash',
+      description: updates.description !== undefined ? updates.description.trim() : (data.description || ''),
+      date: updates.date || data.date || getArgentinaToday(),
+      sourceType: 'MANUAL',
+      sourceId: data.sourceId || movementId,
+      locationId: data.locationId || 'aimogasta',
+      notes: updates.notes !== undefined ? updates.notes.trim() : (data.notes || ''),
+      createdAt: data.createdAtIso || (data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString()),
+      status: data.status || undefined,
+    };
+
+    const local = getLocalCashMovements();
+    const idx = local.findIndex(m => m.id === movementId);
+    if (idx >= 0) {
+      local[idx] = updatedMov;
+      saveLocalCashMovements(local);
+    }
+
+    return updatedMov;
+  },
+
+  /**
+   * Cancel a cash closure record atomically.
+   */
+  async cancelCashClosure(closureId: string, reason: string): Promise<CashClosure> {
+    if (!closureId) throw new Error('ID de cierre de caja no válido');
+    if (!reason?.trim()) throw new Error('Debe proporcionar un motivo de anulación');
+
+    const cleanReason = reason.trim();
+    const nowIso = new Date().toISOString();
+    const closureRef = doc(db, CASH_CLOSURES_COLLECTION, closureId);
+
+    let returnedClosure: CashClosure | null = null;
+
+    await runTransaction(db, async (transaction) => {
+      const snap = await transaction.get(closureRef);
+      if (!snap.exists()) {
+        throw new Error(`No se encontró el cierre de caja (${closureId})`);
+      }
+
+      const data = snap.data();
+      if (data.status === 'CANCELLED') {
+        throw new Error('Este cierre de caja ya fue anulado previamente.');
+      }
+
+      transaction.update(closureRef, {
+        status: 'CANCELLED',
+        cancelledAt: serverTimestamp(),
+        cancelledAtIso: nowIso,
+        cancellationReason: cleanReason,
+      });
+
+      returnedClosure = {
+        id: closureId,
+        date: data.date || getArgentinaToday(),
+        expectedCash: data.expectedCash || 0,
+        countedCash: data.countedCash || 0,
+        difference: data.difference || 0,
+        locationId: data.locationId || 'aimogasta',
+        notes: data.notes || '',
+        createdAt: data.createdAtIso || (data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : nowIso),
+        status: 'CANCELLED',
+        cancelledAt: nowIso,
+        cancellationReason: cleanReason,
+      };
+    });
+
+    if (returnedClosure) {
+      const local = getLocalCashClosures();
+      const idx = local.findIndex(c => c.id === closureId);
+      if (idx >= 0) {
+        local[idx] = returnedClosure;
+      } else {
+        local.unshift(returnedClosure);
+      }
+      saveLocalCashClosures(local);
+    }
+
+    return returnedClosure!;
+  },
+
+  /**
+   * Update counted cash (arqueo) for an active cash closure.
+   */
+  async updateCashClosureArqueo(closureId: string, countedCash: number, notes?: string): Promise<CashClosure> {
+    if (!closureId) throw new Error('ID de cierre de caja no válido');
+    if (countedCash < 0 || isNaN(countedCash)) throw new Error('El importe contado no puede ser negativo');
+
+    const closureRef = doc(db, CASH_CLOSURES_COLLECTION, closureId);
+    const snap = await getDoc(closureRef);
+    if (!snap.exists()) {
+      throw new Error(`No se encontró el cierre de caja (${closureId})`);
+    }
+
+    const data = snap.data();
+    if (data.status === 'CANCELLED') {
+      throw new Error('No se puede modificar un cierre de caja anulado.');
+    }
+
+    const expectedCash = data.expectedCash || 0;
+    const difference = countedCash - expectedCash;
+    const nowIso = new Date().toISOString();
+
+    const fsUpdates: Record<string, any> = {
+      countedCash,
+      difference,
+      updatedAt: serverTimestamp(),
+    };
+    if (notes !== undefined) {
+      fsUpdates.notes = notes.trim();
+    }
+
+    await updateDoc(closureRef, fsUpdates);
+
+    const updatedClosure: CashClosure = {
+      id: closureId,
+      date: data.date || getArgentinaToday(),
+      expectedCash,
+      countedCash,
+      difference,
+      locationId: data.locationId || 'aimogasta',
+      notes: notes !== undefined ? notes.trim() : (data.notes || ''),
+      createdAt: data.createdAtIso || (data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : nowIso),
+      status: data.status || undefined,
+    };
+
+    const local = getLocalCashClosures();
+    const idx = local.findIndex(c => c.id === closureId);
+    if (idx >= 0) {
+      local[idx] = updatedClosure;
+      saveLocalCashClosures(local);
+    }
+
+    return updatedClosure;
   },
 
   /**

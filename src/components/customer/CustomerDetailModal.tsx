@@ -5,6 +5,8 @@ import { SaleRecord } from '../../types/sale';
 import { accountService } from '../../services/firebase/accountService';
 import { salesService } from '../../services/firebase/salesService';
 import { PaymentFormModal } from './PaymentFormModal';
+import { SaleDetailModal } from '../modals/SaleDetailModal';
+import { PaymentDetailModal } from '../modals/PaymentDetailModal';
 import { 
   User, 
   Phone, 
@@ -18,7 +20,8 @@ import {
   Minus, 
   ShoppingBag, 
   CheckCircle2, 
-  AlertCircle 
+  AlertCircle,
+  ExternalLink
 } from 'lucide-react';
 
 interface CustomerDetailModalProps {
@@ -39,6 +42,8 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
   const [loading, setLoading] = useState<boolean>(true);
   const [showPaymentModal, setShowPaymentModal] = useState<boolean>(false);
   const [selectedSale, setSelectedSale] = useState<SaleRecord | null>(null);
+  const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
+  const [selectedPaymentMovement, setSelectedPaymentMovement] = useState<AccountMovement | null>(null);
 
   // Load customer data: movements and balance
   const loadData = useCallback(async () => {
@@ -86,10 +91,12 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
 
     let current = 0;
     const withRunning = sortedAsc.map((mov) => {
-      if (mov.type === 'DEBT') {
-        current += mov.amount;
-      } else {
-        current -= mov.amount;
+      if (mov.status !== 'CANCELLED') {
+        if (mov.type === 'DEBT') {
+          current += mov.amount;
+        } else {
+          current -= mov.amount;
+        }
       }
       return {
         ...mov,
@@ -220,41 +227,91 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                     timeStyle: 'short',
                   });
 
+                  const handleClickMovement = () => {
+                    if (isDebt) {
+                      if (mov.saleId) {
+                        setSelectedSaleId(mov.saleId);
+                      } else {
+                        // Attempt to match sale by amount or timestamp
+                        const matchedSale = sales.find((s) => Math.abs(s.totalAmount - mov.amount) < 0.01);
+                        if (matchedSale) {
+                          setSelectedSale(matchedSale);
+                        }
+                      }
+                    } else {
+                      setSelectedPaymentMovement(mov);
+                    }
+                  };
+
+                  const canOpenSale = isDebt && (mov.saleId || sales.some((s) => Math.abs(s.totalAmount - mov.amount) < 0.01));
+
+                  const isCancelled = mov.status === 'CANCELLED';
+
                   return (
                     <div
                       key={mov.id}
-                      className="p-3.5 bg-white border border-slate-200 rounded-2xl flex items-center justify-between gap-3 shadow-2xs"
+                      onClick={handleClickMovement}
+                      className={`p-3.5 border rounded-2xl flex items-center justify-between gap-3 shadow-2xs cursor-pointer transition-all group ${
+                        isCancelled
+                          ? 'bg-rose-50/40 border-rose-200/80 opacity-80'
+                          : 'bg-white hover:bg-slate-50 border-slate-200 hover:border-slate-300'
+                      }`}
+                      title={isDebt ? (canOpenSale ? 'Hacer clic para ver detalle de la venta' : 'Venta fiada') : 'Hacer clic para ver comprobante del pago'}
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
                         <div
-                          className={`w-9 h-9 rounded-xl flex items-center justify-center text-white ${
-                            isDebt ? 'bg-rose-500' : 'bg-emerald-600'
+                          className={`w-9 h-9 rounded-xl flex items-center justify-center text-white shrink-0 ${
+                            isCancelled
+                              ? 'bg-slate-400'
+                              : isDebt ? 'bg-rose-500' : 'bg-emerald-600'
                           }`}
                         >
                           {isDebt ? <Plus className="w-4 h-4" /> : <Minus className="w-4 h-4" />}
                         </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span
-                              className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md ${
-                                isDebt
-                                  ? 'bg-rose-50 text-rose-700 border border-rose-200'
-                                  : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                              }`}
-                            >
-                              {isDebt ? 'Deuda Fiada' : 'Pago Recibido'}
-                            </span>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {isCancelled ? (
+                              <span className="text-[10px] font-black text-rose-700 bg-rose-100/70 border border-rose-200 px-2 py-0.5 rounded-full">
+                                ANULADO
+                              </span>
+                            ) : (
+                              <span
+                                className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md ${
+                                  isDebt
+                                    ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                                    : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                }`}
+                              >
+                                {isDebt ? 'Deuda Fiada' : 'Pago Recibido'}
+                              </span>
+                            )}
                             <span className="text-[11px] text-slate-400 font-mono">{dateFormatted}</span>
+                            {isDebt && canOpenSale && (
+                              <span className="text-[10px] text-purple-600 font-bold group-hover:underline flex items-center gap-0.5">
+                                <span>Ver venta</span>
+                                <ExternalLink className="w-2.5 h-2.5" />
+                              </span>
+                            )}
+                            {!isDebt && (
+                              <span className="text-[10px] text-emerald-600 font-bold group-hover:underline flex items-center gap-0.5">
+                                <span>Ver pago</span>
+                                <ExternalLink className="w-2.5 h-2.5" />
+                              </span>
+                            )}
                           </div>
-                          <p className="text-xs font-bold text-slate-800 mt-1">
+                          <p className={`text-xs font-bold mt-1 truncate ${isCancelled ? 'text-slate-400 line-through' : 'text-slate-800'}`}>
                             {mov.description || (isDebt ? 'Venta fiada' : 'Pago a cuenta')}
                           </p>
-                          {mov.notes && <p className="text-[11px] text-slate-500 italic">{mov.notes}</p>}
+                          {mov.notes && <p className="text-[11px] text-slate-500 italic truncate">{mov.notes}</p>}
                         </div>
                       </div>
 
-                      <div className="text-right">
-                        <p className={`text-sm font-black font-mono ${isDebt ? 'text-rose-600' : 'text-emerald-700'}`}>
+                      <div className="text-right shrink-0">
+                        <p className={`text-sm font-black font-mono ${
+                          isCancelled
+                            ? 'text-slate-400 line-through'
+                            : isDebt ? 'text-rose-600' : 'text-emerald-700'
+                        }`}>
                           {isDebt ? '+' : '-'}${mov.amount.toLocaleString('es-AR')}
                         </p>
                         <p className="text-[10px] text-slate-400 font-mono mt-0.5">
@@ -277,6 +334,7 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
             ) : (
               <div className="space-y-3">
                 {sales.map((sale) => {
+                  const isSaleCancelled = sale.status === 'CANCELLED';
                   const dateFormatted = new Date(sale.createdAt).toLocaleString('es-AR', {
                     dateStyle: 'short',
                     timeStyle: 'short',
@@ -285,15 +343,26 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                   return (
                     <div
                       key={sale.id}
-                      className="p-4 bg-white border border-slate-200 rounded-2xl shadow-2xs space-y-2 hover:bg-slate-50/50 transition-colors cursor-pointer"
+                      className={`p-4 border rounded-2xl shadow-2xs space-y-2 transition-colors cursor-pointer ${
+                        isSaleCancelled
+                          ? 'bg-rose-50/40 border-rose-200/80 opacity-80'
+                          : 'bg-white border-slate-200 hover:bg-slate-50/50'
+                      }`}
                       onClick={() => setSelectedSale(sale)}
                     >
                       <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-mono font-bold text-slate-700">{sale.id}</span>
+                          <span className={`text-xs font-mono font-bold ${isSaleCancelled ? 'text-rose-900 line-through' : 'text-slate-700'}`}>
+                            {sale.id}
+                          </span>
+                          {isSaleCancelled && (
+                            <span className="text-[10px] font-black text-rose-700 bg-rose-100/70 border border-rose-200 px-2 py-0.5 rounded-full">
+                              ANULADO
+                            </span>
+                          )}
                           <span className="text-[10px] text-slate-400 font-mono">{dateFormatted}</span>
                         </div>
-                        <span className="text-xs font-black font-mono text-emerald-700">
+                        <span className={`text-xs font-black font-mono ${isSaleCancelled ? 'text-slate-400 line-through' : 'text-emerald-700'}`}>
                           ${sale.totalAmount.toLocaleString('es-AR')}
                         </span>
                       </div>
@@ -329,62 +398,27 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
         />
       )}
 
-      {/* Nested Modal for Sale Receipt Detail */}
-      {selectedSale && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[85vh]">
-            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Receipt className="w-5 h-5 text-emerald-400" />
-                <h3 className="font-bold text-sm">Detalle de Venta #{selectedSale.id}</h3>
-              </div>
-              <button
-                onClick={() => setSelectedSale(null)}
-                className="p-1.5 text-slate-400 hover:text-white rounded-full"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      {/* Modal for Sale Detail */}
+      {(selectedSale || selectedSaleId) && (
+        <SaleDetailModal
+          sale={selectedSale}
+          saleId={selectedSaleId}
+          onClose={() => {
+            setSelectedSale(null);
+            setSelectedSaleId(null);
+          }}
+          onOperationCancelled={loadData}
+        />
+      )}
 
-            <div className="p-5 overflow-y-auto space-y-4 font-mono text-xs">
-              <div className="space-y-1 pb-3 border-b border-slate-200 text-slate-500 font-sans">
-                <p><span className="font-bold">Cliente:</span> {customer.name}</p>
-                <p><span className="font-bold">Fecha:</span> {new Date(selectedSale.createdAt).toLocaleString('es-AR')}</p>
-                <p><span className="font-bold">Forma de Pago:</span> Fiado (Cuenta Corriente)</p>
-              </div>
-
-              <div className="space-y-2">
-                {selectedSale.items.map((item, idx) => (
-                  <div key={idx} className="flex justify-between text-slate-800">
-                    <div>
-                      <p className="font-bold">{item.name}</p>
-                      <p className="text-[10px] text-slate-400">
-                        {item.quantity} × ${item.unitPrice.toLocaleString('es-AR')}
-                      </p>
-                    </div>
-                    <p className="font-bold">${item.subtotal.toLocaleString('es-AR')}</p>
-                  </div>
-                ))}
-              </div>
-
-              <div className="pt-3 border-t border-slate-200 flex justify-between items-center font-sans">
-                <span className="font-extrabold text-slate-900 text-sm">TOTAL</span>
-                <span className="text-xl font-black font-mono text-emerald-700">
-                  ${selectedSale.totalAmount.toLocaleString('es-AR')}
-                </span>
-              </div>
-            </div>
-
-            <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end">
-              <button
-                onClick={() => setSelectedSale(null)}
-                className="px-4 py-2 bg-slate-900 text-white text-xs font-bold rounded-xl"
-              >
-                Cerrar Ticket
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* Modal for Payment Detail */}
+      {selectedPaymentMovement && (
+        <PaymentDetailModal
+          movement={selectedPaymentMovement}
+          customerName={customer.name}
+          onClose={() => setSelectedPaymentMovement(null)}
+          onOperationCancelled={loadData}
+        />
       )}
     </div>
   );

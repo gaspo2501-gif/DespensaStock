@@ -10,7 +10,8 @@ import {
   where, 
   orderBy, 
   serverTimestamp,
-  Timestamp
+  Timestamp,
+  onSnapshot
 } from 'firebase/firestore';
 import { db } from './config';
 import { Product, CreateProductInput, StockOperation, getTotalStock } from '../../types/product';
@@ -76,6 +77,20 @@ function saveLocalProducts(products: Product[]) {
 }
 
 export const productService = {
+  /**
+   * Update a product in local cache directly
+   */
+  updateLocalProduct(product: Product): void {
+    const local = getLocalProducts();
+    const idx = local.findIndex(p => p.id === product.id);
+    if (idx !== -1) {
+      local[idx] = product;
+    } else {
+      local.push(product);
+    }
+    saveLocalProducts(local);
+  },
+
   /**
    * Search for a product by barcode in Firestore database
    */
@@ -414,6 +429,35 @@ export const productService = {
       p.barcode.toLowerCase().includes(term) ||
       p.category.toLowerCase().includes(term)
     );
+  },
+
+  /**
+   * Subscribe to real-time products updates from Firestore.
+   * Ensures instant stock updates across the entire application without manual refresh.
+   */
+  subscribeToProducts(callback: (products: Product[]) => void): () => void {
+    try {
+      const q = query(collection(db, PRODUCTS_COLLECTION));
+      const unsubscribe = onSnapshot(q, (querySnapshot) => {
+        const products: Product[] = [];
+        querySnapshot.forEach((docSnap) => {
+          products.push(formatProductFromData(docSnap.id, docSnap.data()));
+        });
+        saveLocalProducts(products);
+        const sorted = products.sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
+        callback(sorted);
+      }, (error) => {
+        console.warn('Firestore onSnapshot error, falling back to local storage products:', error);
+        const local = getLocalProducts();
+        if (local.length > 0) {
+          callback(local.sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' })));
+        }
+      });
+      return unsubscribe;
+    } catch (err) {
+      console.warn('Failed to initialize onSnapshot listener:', err);
+      return () => {};
+    }
   }
 };
 

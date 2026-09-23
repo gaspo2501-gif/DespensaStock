@@ -3,6 +3,7 @@ import { Product, CreateProductInput } from '../../types/product';
 import { Provider } from '../../types/provider';
 import { ProcessPurchaseItemInput, Purchase } from '../../types/purchase';
 import { calculateSuggestedSalePrice } from '../../utils/pricing';
+import { formatLocalDateTime } from '../../utils/dateUtils';
 import { productService } from '../../services/firebase/productService';
 import { purchaseService } from '../../services/firebase/purchaseService';
 import { providerService } from '../../services/firebase/providerService';
@@ -34,7 +35,8 @@ import {
   DollarSign,
   Package,
   Barcode,
-  Building2
+  Building2,
+  AlertCircle
 } from 'lucide-react';
 
 interface PurchaseEntryProps {
@@ -132,8 +134,12 @@ export const PurchaseEntry: React.FC<PurchaseEntryProps> = ({
       setErrorMsg('La cantidad debe ser mayor a cero');
       return;
     }
-    if (pendingCost < 0) {
-      setErrorMsg('El costo no puede ser negativo');
+    if (pendingCost <= 0) {
+      setErrorMsg(`Ingresá el costo de "${pendingProduct.name}".`);
+      return;
+    }
+    if (pendingFinalSalePrice <= 0) {
+      setErrorMsg(`Definir precio de venta de "${pendingProduct.name}".`);
       return;
     }
 
@@ -213,9 +219,10 @@ export const PurchaseEntry: React.FC<PurchaseEntryProps> = ({
       prev.map((i) => {
         if (i.product.id === productId) {
           const suggested = calculateSuggestedSalePrice(newCost);
-          // If cost increased over previous cost, auto update final sale price to suggested
           const prevCost = i.previousCost ?? 0;
-          const shouldAutoUpdatePrice = newCost > prevCost || i.previousSalePrice === 0;
+          const prevPrice = i.previousSalePrice ?? 0;
+          // If new cost > previous cost OR product had no previous price or no current final price:
+          const shouldAutoUpdatePrice = (newCost > prevCost && newCost > 0) || prevPrice <= 0 || !i.finalSalePrice || i.finalSalePrice <= 0;
           return {
             ...i,
             unitCost: newCost,
@@ -240,16 +247,33 @@ export const PurchaseEntry: React.FC<PurchaseEntryProps> = ({
   const totalAmount = draftItems.reduce((acc, i) => acc + i.quantity * i.unitCost, 0);
   const totalUnitsCount = draftItems.reduce((acc, i) => acc + i.quantity, 0);
 
+  // Dynamic validation errors according to exact business rules
+  const validationErrors: string[] = [];
+  if (!selectedProvider) {
+    validationErrors.push('Seleccioná un proveedor para continuar.');
+  }
+  draftItems.forEach((item) => {
+    if (!item.quantity || item.quantity <= 0) {
+      validationErrors.push(`Ingresá una cantidad válida de "${item.product.name}".`);
+    }
+    if (!item.unitCost || item.unitCost <= 0) {
+      validationErrors.push(`Ingresá el costo de "${item.product.name}".`);
+    }
+    if (!item.finalSalePrice || item.finalSalePrice <= 0) {
+      validationErrors.push(`Definir precio de venta de "${item.product.name}".`);
+    }
+  });
+
   // Confirm complete purchase
   const handleConfirmPurchase = async () => {
-    if (!selectedProvider) {
-      setErrorMsg('Debes seleccionar un proveedor para registrar el ingreso');
-      setShowProviderModal(true);
+    if (draftItems.length === 0) {
+      setErrorMsg('Debes agregar al menos un producto al ingreso');
       return;
     }
 
-    if (draftItems.length === 0) {
-      setErrorMsg('Debes agregar al menos un producto al ingreso');
+    if (validationErrors.length > 0) {
+      setErrorMsg(validationErrors[0]);
+      if (!selectedProvider) setShowProviderModal(true);
       return;
     }
 
@@ -258,8 +282,8 @@ export const PurchaseEntry: React.FC<PurchaseEntryProps> = ({
 
     try {
       const result = await purchaseService.processPurchase({
-        providerId: selectedProvider.id,
-        providerName: selectedProvider.name,
+        providerId: selectedProvider!.id,
+        providerName: selectedProvider!.name,
         items: draftItems,
         locationId: activeLocation,
       });
@@ -453,41 +477,53 @@ export const PurchaseEntry: React.FC<PurchaseEntryProps> = ({
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-50 p-3 rounded-2xl border border-slate-200/80 text-xs">
                       {/* Quantity Input */}
                       <div>
-                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Cantidad</label>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                          Cantidad {item.quantity <= 0 && <span className="text-rose-600 font-bold">*</span>}
+                        </label>
                         <div className="flex items-center gap-1">
                           <NumericInput
                             min="1"
                             allowDecimal={false}
                             value={item.quantity}
                             onChangeValue={(val) => handleUpdateItemQty(item.product.id, val)}
-                            className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-900 font-mono font-bold text-center outline-none focus:ring-1 focus:ring-emerald-500"
+                            className={`w-full px-2.5 py-1.5 bg-white border ${
+                              item.quantity <= 0 ? 'border-rose-400 bg-rose-50/40 text-rose-900 ring-1 ring-rose-400' : 'border-slate-300 text-slate-900'
+                            } rounded-lg font-mono font-bold text-center outline-none focus:ring-1 focus:ring-emerald-500`}
                           />
                         </div>
                       </div>
 
                       {/* Unit Cost Input */}
                       <div>
-                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Costo Unit. ($)</label>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                          Costo Unit. ($) {item.unitCost <= 0 && <span className="text-rose-600 font-bold">*</span>}
+                        </label>
                         <NumericInput
                           min="0"
                           step="any"
                           allowDecimal={true}
                           value={item.unitCost}
                           onChangeValue={(val) => handleUpdateItemCost(item.product.id, val)}
-                          className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-900 font-mono font-bold text-center outline-none focus:ring-1 focus:ring-emerald-500"
+                          className={`w-full px-2.5 py-1.5 bg-white border ${
+                            item.unitCost <= 0 ? 'border-rose-400 bg-rose-50/40 text-rose-900 ring-1 ring-rose-400' : 'border-slate-300 text-slate-900'
+                          } rounded-lg font-mono font-bold text-center outline-none focus:ring-1 focus:ring-emerald-500`}
                         />
                       </div>
 
                       {/* Final Sale Price Input */}
                       <div>
-                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Precio Venta ($)</label>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                          Precio Venta ($) {item.finalSalePrice <= 0 && <span className="text-rose-600 font-bold">*</span>}
+                        </label>
                         <NumericInput
                           min="0"
                           step="any"
                           allowDecimal={true}
                           value={item.finalSalePrice}
                           onChangeValue={(val) => handleUpdateItemSalePrice(item.product.id, val)}
-                          className="w-full px-2.5 py-1.5 bg-white border border-emerald-300 rounded-lg text-emerald-900 font-mono font-bold text-center outline-none focus:ring-1 focus:ring-emerald-500"
+                          className={`w-full px-2.5 py-1.5 bg-white border ${
+                            item.finalSalePrice <= 0 ? 'border-rose-400 bg-rose-50/40 text-rose-900 ring-1 ring-rose-400' : 'border-emerald-300 text-emerald-900'
+                          } rounded-lg font-mono font-bold text-center outline-none focus:ring-1 focus:ring-emerald-500`}
                         />
                       </div>
 
@@ -531,6 +567,33 @@ export const PurchaseEntry: React.FC<PurchaseEntryProps> = ({
                 </div>
               </div>
 
+              {/* Dynamic Validation Feedback Banner */}
+              {validationErrors.length > 0 && (
+                <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl space-y-2 animate-fadeIn">
+                  <div className="flex items-center gap-2 font-bold text-xs text-amber-900">
+                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>Falta completar para confirmar el ingreso:</span>
+                  </div>
+                  <ul className="space-y-1 pl-6 list-disc text-xs text-amber-800 font-medium">
+                    {validationErrors.map((err, idx) => (
+                      <li key={idx}>{err}</li>
+                    ))}
+                  </ul>
+                  {!selectedProvider && (
+                    <div className="pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setShowProviderModal(true)}
+                        className="px-3 py-1.5 bg-amber-200/80 hover:bg-amber-200 text-amber-950 font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors"
+                      >
+                        <Building2 className="w-3.5 h-3.5" />
+                        <span>Seleccionar proveedor ahora</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="flex gap-2">
                 <button
                   onClick={handleResetPurchase}
@@ -541,8 +604,8 @@ export const PurchaseEntry: React.FC<PurchaseEntryProps> = ({
 
                 <button
                   onClick={handleConfirmPurchase}
-                  disabled={isConfirming || !selectedProvider}
-                  className="w-2/3 py-3.5 px-4 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs rounded-2xl shadow-lg transition-all flex items-center justify-center gap-2"
+                  disabled={isConfirming || validationErrors.length > 0}
+                  className="w-2/3 py-3.5 px-4 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs rounded-2xl shadow-lg transition-all flex items-center justify-center gap-2"
                 >
                   {isConfirming ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -586,7 +649,7 @@ export const PurchaseEntry: React.FC<PurchaseEntryProps> = ({
             </div>
             <div className="flex justify-between text-slate-500 pt-1 border-t border-slate-200">
               <span>Fecha y Hora:</span>
-              <span>{new Date(completedPurchase.createdAt).toLocaleString('es-AR')}</span>
+              <span>{formatLocalDateTime(completedPurchase.createdAt)}</span>
             </div>
           </div>
 
@@ -671,7 +734,7 @@ export const PurchaseEntry: React.FC<PurchaseEntryProps> = ({
                       setPendingCost(c);
                       const sugg = calculateSuggestedSalePrice(c);
                       const prevCost = pendingProduct.currentCost ?? pendingProduct.lastCost ?? pendingProduct.costPrice ?? 0;
-                      if (c > prevCost || (pendingProduct.salePrice || 0) === 0) {
+                      if (c > prevCost || (pendingProduct.salePrice || 0) === 0 || pendingFinalSalePrice === 0) {
                         setPendingFinalSalePrice(sugg);
                       }
                     }}

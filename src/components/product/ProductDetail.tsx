@@ -22,6 +22,7 @@ import {
   DollarSign
 } from 'lucide-react';
 import { getCategoryBadgeColor } from '../../utils/categories';
+import { formatLocalDate, formatLocalDateTime } from '../../utils/dateUtils';
 
 interface ProductDetailProps {
   product: Product;
@@ -94,17 +95,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
 
   const formatDate = (isoString?: string) => {
     if (!isoString) return 'Fecha desconocida';
-    try {
-      return new Date(isoString).toLocaleDateString('es-AR', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-    } catch {
-      return isoString;
-    }
+    return formatLocalDateTime(isoString);
   };
 
   const handleDeleteConfirmed = async () => {
@@ -260,7 +251,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                     </div>
                     <div className="flex items-center justify-between text-slate-600 text-[11px]">
                       <span className="font-semibold text-slate-800">🏢 {lastPurchase.providerName}</span>
-                      <span>{new Date(lastPurchase.purchaseDate).toLocaleDateString('es-AR')}</span>
+                      <span>{formatLocalDate(lastPurchase.purchaseDate)}</span>
                     </div>
                   </div>
                 )}
@@ -277,7 +268,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                     </div>
                     <div className="flex items-center justify-between text-emerald-900 text-[11px]">
                       <span className="font-bold">🏆 {bestCost.providerName}</span>
-                      <span>{new Date(bestCost.purchaseDate).toLocaleDateString('es-AR')}</span>
+                      <span>{formatLocalDate(bestCost.purchaseDate)}</span>
                     </div>
                   </div>
                 )}
@@ -290,7 +281,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                       <div>
                         <span className="font-bold text-slate-800">{item.providerName}</span>
                         <p className="text-slate-400 text-[10px]">
-                          {item.quantity} un. • {new Date(item.purchaseDate).toLocaleDateString('es-AR')}
+                          {item.quantity} un. • {formatLocalDate(item.purchaseDate)}
                         </p>
                       </div>
                       <span className="font-mono font-bold text-slate-900">${item.unitCost}</span>

@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   ArrowLeftRight, 
   X, 
@@ -8,9 +9,9 @@ import {
   Building2, 
   Package, 
   Camera, 
-  RotateCcw,
-  Check,
-  Search
+  RotateCcw, 
+  Check, 
+  Search 
 } from 'lucide-react';
 import { Product, getProductStock } from '../../types/product';
 import { LocationId, getLocationName } from '../../types/location';
@@ -59,6 +60,15 @@ export const StockTransferModal: React.FC<StockTransferModalProps> = ({
   const selectedProduct = products.find((p) => p.id === selectedProductId);
   const sourceStock = selectedProduct ? getProductStock(selectedProduct, fromLocation) : 0;
   const targetStock = selectedProduct ? getProductStock(selectedProduct, toLocation) : 0;
+
+  // Lock background scroll while modal is active and restore on unmount
+  useEffect(() => {
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, []);
 
   const numQty = typeof quantity === 'number' ? quantity : parseInt(quantity, 10) || 0;
 
@@ -159,7 +169,7 @@ export const StockTransferModal: React.FC<StockTransferModalProps> = ({
     }
   };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
       <div className="bg-white border border-slate-200 rounded-3xl max-w-lg w-full shadow-2xl overflow-hidden animate-fade-in my-auto max-h-[92vh] flex flex-col">
         {/* Modal Header */}
@@ -563,6 +573,7 @@ export const StockTransferModal: React.FC<StockTransferModalProps> = ({
           </div>
         </div>
       )}
-    </div>
+    </div>,
+    document.body
   );
 };

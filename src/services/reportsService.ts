@@ -26,6 +26,16 @@ import { Expense } from '../types/expense';
 import { Purchase } from '../types/purchase';
 import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 import { db } from './firebase/config';
+import { 
+  toArgentinaDateString, 
+  getArgentinaToday, 
+  getArgentinaYesterday, 
+  getArgentinaDaysAgo, 
+  getArgentinaFirstOfMonth, 
+  formatLocalDate, 
+  getArgentinaDayRange, 
+  isWithinArgentinaRange 
+} from '../utils/dateUtils';
 
 function parseDate(dateInput: any): Date {
   if (!dateInput) return new Date(0);
@@ -61,59 +71,127 @@ export const reportsService = {
     prevEnd: Date;
     label: string;
   } {
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-
-    let start = todayStart;
-    let end = todayEnd;
-    let prevStart = new Date(todayStart.getTime() - 86400000);
-    let prevEnd = new Date(todayEnd.getTime() - 86400000);
-    let label = 'Hoy';
-
     if (filter.period === 'today') {
-      start = todayStart;
-      end = todayEnd;
-      prevStart = new Date(todayStart.getTime() - 86400000);
-      prevEnd = new Date(todayEnd.getTime() - 86400000);
-      label = `Hoy (${todayStart.toLocaleDateString('es-AR')})`;
-    } else if (filter.period === 'yesterday') {
-      start = new Date(todayStart.getTime() - 86400000);
-      end = new Date(todayEnd.getTime() - 86400000);
-      prevStart = new Date(todayStart.getTime() - 2 * 86400000);
-      prevEnd = new Date(todayEnd.getTime() - 2 * 86400000);
-      label = `Ayer (${start.toLocaleDateString('es-AR')})`;
-    } else if (filter.period === 'last7days') {
-      start = new Date(todayStart.getTime() - 6 * 86400000);
-      end = todayEnd;
-      prevStart = new Date(start.getTime() - 7 * 86400000);
-      prevEnd = new Date(start.getTime() - 1);
-      label = `Últimos 7 días (${start.toLocaleDateString('es-AR')} - ${end.toLocaleDateString('es-AR')})`;
-    } else if (filter.period === 'thisMonth') {
-      start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-      end = todayEnd;
-      const daysPassed = Math.floor((end.getTime() - start.getTime()) / 86400000) + 1;
-      prevStart = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
-      prevEnd = new Date(prevStart.getTime() + daysPassed * 86400000 - 1);
-      label = `Este mes (${start.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })})`;
-    } else if (filter.period === 'lastMonth') {
-      start = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
-      end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
-      prevStart = new Date(now.getFullYear(), now.getMonth() - 2, 1, 0, 0, 0, 0);
-      prevEnd = new Date(now.getFullYear(), now.getMonth() - 1, 0, 23, 59, 59, 999);
-      label = `Mes anterior (${start.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })})`;
-    } else if (filter.period === 'custom' && filter.fromDate && filter.toDate) {
-      const fParts = filter.fromDate.split('-');
-      const tParts = filter.toDate.split('-');
-      start = new Date(parseInt(fParts[0]), parseInt(fParts[1]) - 1, parseInt(fParts[2]), 0, 0, 0, 0);
-      end = new Date(parseInt(tParts[0]), parseInt(tParts[1]) - 1, parseInt(tParts[2]), 23, 59, 59, 999);
-      const diffMs = end.getTime() - start.getTime();
-      prevStart = new Date(start.getTime() - diffMs - 1);
-      prevEnd = new Date(start.getTime() - 1);
-      label = `Personalizado (${start.toLocaleDateString('es-AR')} - ${end.toLocaleDateString('es-AR')})`;
+      const todayStr = getArgentinaToday();
+      const dayRange = getArgentinaDayRange(todayStr);
+      const prevRange = getArgentinaDayRange(getArgentinaYesterday());
+      return {
+        start: dayRange.start,
+        end: dayRange.end,
+        prevStart: prevRange.start,
+        prevEnd: prevRange.end,
+        label: `Hoy (${formatLocalDate(todayStr)})`,
+      };
     }
 
-    return { start, end, prevStart, prevEnd, label };
+    if (filter.period === 'yesterday') {
+      const yesterdayStr = getArgentinaYesterday();
+      const dayRange = getArgentinaDayRange(yesterdayStr);
+      const prevRange = getArgentinaDayRange(getArgentinaDaysAgo(2));
+      return {
+        start: dayRange.start,
+        end: dayRange.end,
+        prevStart: prevRange.start,
+        prevEnd: prevRange.end,
+        label: `Ayer (${formatLocalDate(yesterdayStr)})`,
+      };
+    }
+
+    if (filter.period === 'last7days') {
+      const todayStr = getArgentinaToday();
+      const startStr = getArgentinaDaysAgo(6);
+      const start = getArgentinaDayRange(startStr).start;
+      const end = getArgentinaDayRange(todayStr).end;
+      const prevStart = getArgentinaDayRange(getArgentinaDaysAgo(13)).start;
+      const prevEnd = getArgentinaDayRange(getArgentinaDaysAgo(7)).end;
+      return {
+        start,
+        end,
+        prevStart,
+        prevEnd,
+        label: `Últimos 7 días (${formatLocalDate(startStr)} - ${formatLocalDate(todayStr)})`,
+      };
+    }
+
+    if (filter.period === 'thisMonth') {
+      const todayStr = getArgentinaToday();
+      const firstOfMonthStr = getArgentinaFirstOfMonth();
+      const start = getArgentinaDayRange(firstOfMonthStr).start;
+      const end = getArgentinaDayRange(todayStr).end;
+
+      const [y, m] = todayStr.split('-').map(Number);
+      const prevMonthDate = new Date(Date.UTC(y, m - 2, 1, 12, 0, 0));
+      const prevY = prevMonthDate.getUTCFullYear();
+      const prevM = String(prevMonthDate.getUTCMonth() + 1).padStart(2, '0');
+      const prevFirstOfMonthStr = `${prevY}-${prevM}-01`;
+      const prevStart = getArgentinaDayRange(prevFirstOfMonthStr).start;
+      const daysPassed = Math.floor((end.getTime() - start.getTime()) / 86400000) + 1;
+      const prevEnd = new Date(prevStart.getTime() + daysPassed * 86400000 - 1);
+
+      return {
+        start,
+        end,
+        prevStart,
+        prevEnd,
+        label: `Este mes (${formatLocalDate(firstOfMonthStr)} - ${formatLocalDate(todayStr)})`,
+      };
+    }
+
+    if (filter.period === 'lastMonth') {
+      const todayStr = getArgentinaToday();
+      const [y, m] = todayStr.split('-').map(Number);
+      const lastDayPrevMonth = new Date(Date.UTC(y, m - 1, 0, 12, 0, 0));
+      const lpY = lastDayPrevMonth.getUTCFullYear();
+      const lpM = String(lastDayPrevMonth.getUTCMonth() + 1).padStart(2, '0');
+      const lpD = String(lastDayPrevMonth.getUTCDate()).padStart(2, '0');
+      const startStr = `${lpY}-${lpM}-01`;
+      const endStr = `${lpY}-${lpM}-${lpD}`;
+      const start = getArgentinaDayRange(startStr).start;
+      const end = getArgentinaDayRange(endStr).end;
+
+      const lastDay2MonthsAgo = new Date(Date.UTC(y, m - 2, 0, 12, 0, 0));
+      const p2Y = lastDay2MonthsAgo.getUTCFullYear();
+      const p2M = String(lastDay2MonthsAgo.getUTCMonth() + 1).padStart(2, '0');
+      const p2D = String(lastDay2MonthsAgo.getUTCDate()).padStart(2, '0');
+      const prevStartStr = `${p2Y}-${p2M}-01`;
+      const prevEndStr = `${p2Y}-${p2M}-${p2D}`;
+      const prevStart = getArgentinaDayRange(prevStartStr).start;
+      const prevEnd = getArgentinaDayRange(prevEndStr).end;
+
+      return {
+        start,
+        end,
+        prevStart,
+        prevEnd,
+        label: `Mes anterior (${formatLocalDate(startStr)} - ${formatLocalDate(endStr)})`,
+      };
+    }
+
+    if (filter.period === 'custom' && filter.fromDate && filter.toDate) {
+      const start = getArgentinaDayRange(filter.fromDate).start;
+      const end = getArgentinaDayRange(filter.toDate).end;
+      const diffMs = end.getTime() - start.getTime();
+      const prevStart = new Date(start.getTime() - diffMs - 1);
+      const prevEnd = new Date(start.getTime() - 1);
+      return {
+        start,
+        end,
+        prevStart,
+        prevEnd,
+        label: `Personalizado (${formatLocalDate(filter.fromDate)} - ${formatLocalDate(filter.toDate)})`,
+      };
+    }
+
+    // Default fallback to thisMonth
+    const todayStr = getArgentinaToday();
+    const dayRange = getArgentinaDayRange(todayStr);
+    return {
+      start: dayRange.start,
+      end: dayRange.end,
+      prevStart: dayRange.start,
+      prevEnd: dayRange.end,
+      label: `Hoy (${formatLocalDate(todayStr)})`,
+    };
   },
 
   /**
@@ -154,18 +232,18 @@ export const reportsService = {
       }))
     ]);
 
-    // Filter by locationId if specified
-    const allSales = locationId
+    // Filter by locationId if specified and exclude cancelled records from metrics
+    const allSales = (locationId
       ? rawSales.filter((s: any) => !s.locationId || s.locationId === locationId)
-      : rawSales;
+      : rawSales).filter((s: any) => s.status !== 'CANCELLED');
 
-    const allExpenses = locationId
+    const allExpenses = (locationId
       ? rawExpenses.filter((e: any) => !e.locationId || e.locationId === locationId)
-      : rawExpenses;
+      : rawExpenses).filter((e: any) => e.status !== 'CANCELLED');
 
-    const allPurchases = locationId
+    const allPurchases = (locationId
       ? rawPurchases.filter((p: any) => !p.locationId || p.locationId === locationId)
-      : rawPurchases;
+      : rawPurchases).filter((p: any) => p.status !== 'CANCELLED');
 
     // Product lookup map
     const productMap = new Map<string, Product>();
@@ -173,13 +251,11 @@ export const reportsService = {
 
     // Filter sales by current range vs previous range
     const currentSales = allSales.filter(s => {
-      const d = parseDate(s.createdAt);
-      return d >= range.start && d <= range.end;
+      return isWithinArgentinaRange(s.date || s.createdAt, range.start, range.end);
     });
 
     const prevSales = allSales.filter(s => {
-      const d = parseDate(s.createdAt);
-      return d >= range.prevStart && d <= range.prevEnd;
+      return isWithinArgentinaRange(s.date || s.createdAt, range.prevStart, range.prevEnd);
     });
 
     // 1. Sales KPI Metrics
@@ -239,8 +315,8 @@ export const reportsService = {
     // 2. Daily Sales Series for Chart
     const dailyMap = new Map<string, { revenue: number; count: number }>();
     currentSales.forEach(s => {
-      const d = parseDate(s.createdAt);
-      const key = d.toISOString().split('T')[0];
+      const key = s.date || toArgentinaDateString(s.createdAt);
+      if (!key) return;
       const cur = dailyMap.get(key) || { revenue: 0, count: 0 };
       dailyMap.set(key, {
         revenue: cur.revenue + (s.totalAmount || 0),
@@ -335,13 +411,11 @@ export const reportsService = {
 
     // 5. Operating Expenses Metrics
     const currentExpenses = allExpenses.filter(e => {
-      const d = parseDate(e.date || e.createdAt);
-      return d >= range.start && d <= range.end;
+      return isWithinArgentinaRange(e.date || e.createdAt, range.start, range.end);
     });
 
     const prevExpenses = allExpenses.filter(e => {
-      const d = parseDate(e.date || e.createdAt);
-      return d >= range.prevStart && d <= range.prevEnd;
+      return isWithinArgentinaRange(e.date || e.createdAt, range.prevStart, range.prevEnd);
     });
 
     const totalExpensesAmount = currentExpenses.reduce((acc, e) => acc + (e.amount || 0), 0);
@@ -369,13 +443,11 @@ export const reportsService = {
 
     // 6. Purchases & Suppliers Metrics
     const currentPurchases = allPurchases.filter(p => {
-      const d = parseDate(p.createdAt);
-      return d >= range.start && d <= range.end;
+      return isWithinArgentinaRange(p.date || p.purchaseDate || p.createdAt, range.start, range.end);
     });
 
     const prevPurchases = allPurchases.filter(p => {
-      const d = parseDate(p.createdAt);
-      return d >= range.prevStart && d <= range.prevEnd;
+      return isWithinArgentinaRange(p.date || p.purchaseDate || p.createdAt, range.prevStart, range.prevEnd);
     });
 
     const totalPurchasesAmount = currentPurchases.reduce((acc, p) => acc + (p.totalAmount || 0), 0);
@@ -602,7 +674,10 @@ export const reportsService = {
           createdAt: data.createdAtIso || (data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString()),
           totalAmount: data.totalAmount || 0,
           totalItemsCount: data.totalItemsCount || 0,
-          items: data.items || []
+          items: data.items || [],
+          status: data.status,
+          cancellationReason: data.cancelReason || data.cancellationReason,
+          cancelledAt: data.cancelledAt
         });
       });
       return purchases;

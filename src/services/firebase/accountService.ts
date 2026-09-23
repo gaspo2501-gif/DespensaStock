@@ -1,8 +1,10 @@
 import { 
   collection, 
   doc, 
+  getDoc,
   getDocs, 
   setDoc, 
+  runTransaction,
   query, 
   where, 
   orderBy, 
@@ -60,6 +62,10 @@ export const accountService = {
             saleId: data.saleId || undefined,
             locationId: movLoc,
             notes: data.notes || '',
+            paymentMethod: data.paymentMethod || undefined,
+            status: data.status || undefined,
+            cancelledAt: data.cancelledAtIso || (data.cancelledAt?.toDate ? data.cancelledAt.toDate().toISOString() : undefined),
+            cancellationReason: data.cancellationReason || undefined,
           });
         }
       });
@@ -102,6 +108,10 @@ export const accountService = {
             saleId: data.saleId || undefined,
             locationId: movLoc,
             notes: data.notes || '',
+            paymentMethod: data.paymentMethod || undefined,
+            status: data.status || undefined,
+            cancelledAt: data.cancelledAtIso || (data.cancelledAt?.toDate ? data.cancelledAt.toDate().toISOString() : undefined),
+            cancellationReason: data.cancellationReason || undefined,
           });
         }
       });
@@ -117,12 +127,45 @@ export const accountService = {
   },
 
   /**
-   * Calculate current pending debt balance for a single customer
+   * Get a single account movement by ID
+   */
+  async getMovementById(movementId: string): Promise<AccountMovement | null> {
+    try {
+      const docRef = doc(db, MOVEMENTS_COLLECTION, movementId);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        return {
+          id: docSnap.id,
+          customerId: data.customerId,
+          type: data.type,
+          amount: data.amount || 0,
+          createdAt: data.createdAtIso || (data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString()),
+          description: data.description || '',
+          saleId: data.saleId || undefined,
+          locationId: data.locationId || 'aimogasta',
+          notes: data.notes || '',
+          paymentMethod: data.paymentMethod || undefined,
+          status: data.status || undefined,
+          cancelledAt: data.cancelledAtIso || (data.cancelledAt?.toDate ? data.cancelledAt.toDate().toISOString() : undefined),
+          cancellationReason: data.cancellationReason || undefined,
+        };
+      }
+    } catch (err) {
+      console.warn('Error al obtener movimiento de cuenta de Firestore:', err);
+    }
+    const local = getLocalMovements();
+    return local.find((m) => m.id === movementId) || null;
+  },
+
+  /**
+   * Calculate current pending debt balance for a single customer (excluding cancelled movements)
    */
   async getCustomerBalance(customerId: string, locationId?: LocationSelection): Promise<number> {
     const movements = await this.getCustomerMovements(customerId, locationId);
     let balance = 0;
     for (const mov of movements) {
+      if (mov.status === 'CANCELLED') continue; // Ignorar operaciones anuladas
       if (mov.type === 'DEBT') {
         balance += mov.amount;
       } else if (mov.type === 'PAYMENT') {
@@ -133,13 +176,14 @@ export const accountService = {
   },
 
   /**
-   * Get map of customer balances: { [customerId]: balance }
+   * Get map of customer balances: { [customerId]: balance } (excluding cancelled movements)
    */
   async getAllBalances(locationId?: LocationSelection): Promise<Record<string, number>> {
     const allMovements = await this.getAllMovements(locationId);
     const balances: Record<string, number> = {};
 
     for (const mov of allMovements) {
+      if (mov.status === 'CANCELLED') continue; // Ignorar operaciones anuladas
       if (!balances[mov.customerId]) {
         balances[mov.customerId] = 0;
       }
@@ -278,6 +322,134 @@ export const accountService = {
     saveLocalMovements(local);
 
     return newMov as AccountMovement;
+  },
+
+  /**
+   * Cancel an existing customer payment atomically:
+   * 1. Validates that movement exists and is of type PAYMENT.
+   * 2. Validates that it's not already CANCELLED.
+   * 3. Cancels any associated cash movement (in cash_movements).
+   * 4. Updates payment movement to CANCELLED.
+   * 5. Updates local caches.
+   */
+  async cancelPayment(paymentId: string, reason: string): Promise<AccountMovement> {
+    if (!paymentId) throw new Error('ID de pago no válido');
+    if (!reason?.trim()) throw new Error('Debe proporcionar un motivo de anulación');
+
+    const cleanReason = reason.trim();
+    const nowIso = new Date().toISOString();
+
+    // Look for corresponding cash movement
+    let existingCashMovRef: any = null;
+    const directCashRef1 = doc(db, 'cash_movements', `mov_cash_customer_payment_${paymentId}`);
+    const directCashRef2 = doc(db, 'cash_movements', `mov_cash_pay_${paymentId}`);
+    const direct1Snap = await getDoc(directCashRef1);
+    if (direct1Snap.exists()) {
+      existingCashMovRef = directCashRef1;
+    } else {
+      const direct2Snap = await getDoc(directCashRef2);
+      if (direct2Snap.exists()) {
+        existingCashMovRef = directCashRef2;
+      } else {
+        const cashQ = query(
+          collection(db, 'cash_movements'),
+          where('sourceType', '==', 'CUSTOMER_PAYMENT'),
+          where('sourceId', '==', paymentId)
+        );
+        const cashSnap = await getDocs(cashQ);
+        if (!cashSnap.empty) {
+          existingCashMovRef = cashSnap.docs[0].ref;
+        }
+      }
+    }
+
+    let returnedMovement: AccountMovement | null = null;
+
+    await runTransaction(db, async (transaction) => {
+      const movRef = doc(db, MOVEMENTS_COLLECTION, paymentId);
+      const movDoc = await transaction.get(movRef);
+      if (!movDoc.exists()) {
+        throw new Error(`No se encontró el comprobante de pago (${paymentId})`);
+      }
+
+      const movData = movDoc.data();
+      if (movData.type !== 'PAYMENT') {
+        throw new Error('El comprobante indicado no corresponde a un pago de cliente.');
+      }
+      if (movData.status === 'CANCELLED') {
+        throw new Error('Este pago ya fue anulado previamente.');
+      }
+
+      // Check cash movement inside transaction
+      let cashSnapInTx: any = null;
+      if (existingCashMovRef) {
+        cashSnapInTx = await transaction.get(existingCashMovRef);
+      }
+
+      // --- WRITES ---
+      // A: If cash movement found, mark CANCELLED
+      if (existingCashMovRef && cashSnapInTx && cashSnapInTx.exists()) {
+        transaction.update(existingCashMovRef, {
+          status: 'CANCELLED',
+          cancelledAt: serverTimestamp(),
+          cancelledAtIso: nowIso,
+          cancellationReason: cleanReason,
+        });
+      }
+
+      // B: Mark payment movement as CANCELLED
+      transaction.update(movRef, {
+        status: 'CANCELLED',
+        cancelledAt: serverTimestamp(),
+        cancelledAtIso: nowIso,
+        cancellationReason: cleanReason,
+      });
+
+      returnedMovement = {
+        id: paymentId,
+        customerId: movData.customerId,
+        type: 'PAYMENT',
+        amount: movData.amount || 0,
+        createdAt: movData.createdAtIso || (movData.createdAt?.toDate ? movData.createdAt.toDate().toISOString() : nowIso),
+        description: movData.description || 'Pago a cuenta',
+        saleId: movData.saleId,
+        locationId: movData.locationId || 'aimogasta',
+        notes: movData.notes,
+        paymentMethod: movData.paymentMethod,
+        status: 'CANCELLED',
+        cancelledAt: nowIso,
+        cancellationReason: cleanReason,
+      };
+    });
+
+    // Local caches update
+    if (returnedMovement) {
+      const local = getLocalMovements();
+      const idx = local.findIndex(m => m.id === paymentId);
+      if (idx >= 0) {
+        local[idx] = returnedMovement;
+      } else {
+        local.unshift(returnedMovement);
+      }
+      saveLocalMovements(local);
+
+      // Also update local cash movements if any
+      try {
+        const rawCash = localStorage.getItem('despensa_stock_local_cash_movements');
+        if (rawCash) {
+          const localCash = JSON.parse(rawCash);
+          const cIdx = localCash.findIndex((c: any) => c.sourceType === 'CUSTOMER_PAYMENT' && c.sourceId === paymentId);
+          if (cIdx >= 0) {
+            localCash[cIdx].status = 'CANCELLED';
+            localCash[cIdx].cancelledAt = nowIso;
+            localCash[cIdx].cancellationReason = cleanReason;
+            localStorage.setItem('despensa_stock_local_cash_movements', JSON.stringify(localCash));
+          }
+        }
+      } catch {}
+    }
+
+    return returnedMovement!;
   },
 };
 

@@ -1,6 +1,7 @@
 import { 
   collection, 
   doc, 
+  getDoc,
   runTransaction, 
   getDocs, 
   query, 
@@ -9,9 +10,10 @@ import {
 } from 'firebase/firestore';
 import { db } from './config';
 import { StockTransfer, CreateStockTransferInput } from '../../types/stockTransfer';
-import { getLocationName } from '../../types/location';
+import { getLocationName, LocationSelection } from '../../types/location';
 import { Product } from '../../types/product';
 import { productService } from './productService';
+import { getArgentinaToday, toArgentinaDateString } from '../../utils/dateUtils';
 
 const TRANSFERS_COLLECTION = 'stock_transfers';
 const PRODUCTS_COLLECTION = 'products';
@@ -96,8 +98,10 @@ export const stockTransferService = {
         });
 
         const transferRef = doc(db, TRANSFERS_COLLECTION, transferId);
+        const operatingDate = getArgentinaToday();
         const transferPayload = {
           id: transferId,
+          date: operatingDate,
           productId,
           barcode: data.barcode || '',
           productName: data.name || 'Producto',
@@ -115,6 +119,7 @@ export const stockTransferService = {
 
         transferRecord = {
           id: transferId,
+          date: operatingDate,
           productId,
           barcode: data.barcode || '',
           productName: data.name || 'Producto',
@@ -163,6 +168,7 @@ export const stockTransferService = {
 
       transferRecord = {
         id: transferId,
+        date: getArgentinaToday(),
         productId,
         barcode: targetP.barcode,
         productName: targetP.name,
@@ -200,6 +206,7 @@ export const stockTransferService = {
         const data = docSnap.data();
         transfers.push({
           id: docSnap.id,
+          date: data.date || toArgentinaDateString(data.createdAtIso || data.createdAt) || getArgentinaToday(),
           productId: data.productId,
           barcode: data.barcode || '',
           productName: data.productName || 'Producto',
@@ -219,5 +226,46 @@ export const stockTransferService = {
       console.warn('Error fetching transfer history, using local cache:', err);
       return getLocalTransfers();
     }
+  },
+
+  /**
+   * Fetch transfer history with optional location filter
+   */
+  async getTransfers(locationId?: LocationSelection): Promise<StockTransfer[]> {
+    const list = await this.getTransferHistory();
+    if (!locationId || locationId === 'all') return list;
+    return list.filter(
+      (t) => t.sourceLocationId === locationId || t.destinationLocationId === locationId
+    );
+  },
+
+  /**
+   * Get single transfer by ID
+   */
+  async getTransferById(id: string): Promise<StockTransfer | null> {
+    try {
+      const docRef = doc(db, TRANSFERS_COLLECTION, id);
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        const data = snap.data();
+        return {
+          id: snap.id,
+          productId: data.productId,
+          barcode: data.barcode || '',
+          productName: data.productName || 'Producto',
+          quantity: data.quantity || 0,
+          sourceLocationId: data.sourceLocationId || 'aimogasta',
+          sourceLocationName: data.sourceLocationName || getLocationName(data.sourceLocationId),
+          destinationLocationId: data.destinationLocationId || 'olascoaga',
+          destinationLocationName: data.destinationLocationName || getLocationName(data.destinationLocationId),
+          createdAt: data.createdAtIso || (data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString()),
+          notes: data.notes || '',
+        };
+      }
+    } catch (err) {
+      console.warn('Error fetching transfer by ID:', err);
+    }
+    const local = getLocalTransfers();
+    return local.find((t) => t.id === id) || null;
   },
 };

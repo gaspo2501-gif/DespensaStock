@@ -16,6 +16,9 @@ export interface CashMovement {
   locationId?: string;
   notes?: string;
   createdAt: string; // ISO string
+  status?: 'ACTIVE' | 'CANCELLED';
+  cancelledAt?: string;
+  cancellationReason?: string;
 }
 
 export type CreateCashMovementInput = Omit<CashMovement, 'id' | 'createdAt'>;
@@ -29,6 +32,9 @@ export interface CashClosure {
   locationId?: string;
   notes?: string;
   createdAt: string; // ISO string
+  status?: 'ACTIVE' | 'CANCELLED';
+  cancelledAt?: string;
+  cancellationReason?: string;
 }
 
 export interface CashBalanceSummary {

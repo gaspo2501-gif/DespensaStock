@@ -21,10 +21,14 @@ export interface PurchaseItem {
   suggestedSalePrice: number;
   finalSalePrice: number;
   purchaseDate: string; // ISO string
+  status?: 'ACTIVE' | 'CANCELLED';
+  cancelledAt?: string;
+  cancellationReason?: string;
 }
 
 export interface Purchase {
   id: string;
+  date?: string; // Operating business date YYYY-MM-DD in Argentina
   providerId: string;
   providerName: string;
   locationId?: string;
@@ -32,6 +36,9 @@ export interface Purchase {
   totalAmount: number;
   totalItemsCount: number;
   items: PurchaseItem[];
+  status?: 'ACTIVE' | 'CANCELLED';
+  cancelledAt?: string;
+  cancellationReason?: string;
 }
 
 export interface ProcessPurchaseItemInput {

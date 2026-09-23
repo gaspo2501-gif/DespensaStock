@@ -3,6 +3,7 @@ import { NavigationTab, Product } from '../types/product';
 import { SaleRecord } from '../types/sale';
 import { salesService } from '../services/firebase/salesService';
 import { accountService } from '../services/firebase/accountService';
+import { getArgentinaToday, toArgentinaDateString, formatLocalDateTime } from '../utils/dateUtils';
 import { 
   ShoppingCart, 
   ScanLine, 
@@ -70,9 +71,9 @@ export const Home: React.FC<HomeProps> = ({
 
   // Compute Today's Sales
   const todaySalesData = useMemo(() => {
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getArgentinaToday();
     const salesToday = recentSales.filter((s) => {
-      const saleDateStr = new Date(s.createdAt).toISOString().split('T')[0];
+      const saleDateStr = s.date || toArgentinaDateString(s.createdAt);
       return saleDateStr === todayStr;
     });
 
@@ -403,7 +404,7 @@ export const Home: React.FC<HomeProps> = ({
                         </span>
                       </div>
                       <p className="text-[10px] text-slate-400 mt-0.5">
-                        {new Date(sale.createdAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })} • {sale.totalItemsCount} {sale.totalItemsCount === 1 ? 'item' : 'items'}
+                        {formatLocalDateTime(sale.createdAt)} • {sale.totalItemsCount} {sale.totalItemsCount === 1 ? 'item' : 'items'}
                       </p>
                     </div>
 

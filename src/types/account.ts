@@ -10,6 +10,10 @@ export interface AccountMovement {
   saleId?: string;
   locationId?: string;
   notes?: string;
+  paymentMethod?: string;
+  status?: 'ACTIVE' | 'CANCELLED';
+  cancelledAt?: string;
+  cancellationReason?: string;
 }
 
 export interface CustomerAccountSummary {

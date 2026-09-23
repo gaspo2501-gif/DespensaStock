@@ -1,5 +1,6 @@
 export interface StockTransfer {
   id: string;
+  date?: string; // Operating business date YYYY-MM-DD in Argentina
   productId: string;
   barcode: string;
   productName: string;
@@ -19,3 +20,5 @@ export interface CreateStockTransferInput {
   quantity: number;
   notes?: string;
 }
+
+export type StockTransferRecord = StockTransfer;

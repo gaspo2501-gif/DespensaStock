@@ -22,6 +22,7 @@ export type PaymentMethod = 'cash' | 'mercado_pago' | 'credit';
 
 export interface SaleRecord {
   id: string;
+  date?: string; // Operating business date YYYY-MM-DD in Argentina
   createdAt: string; // ISO timestamp
   items: SaleItemRecord[];
   totalAmount: number;
@@ -30,4 +31,7 @@ export interface SaleRecord {
   customerId?: string;
   customerName?: string;
   locationId?: string;
+  status?: 'ACTIVE' | 'CANCELLED';
+  cancelledAt?: string;
+  cancellationReason?: string;
 }

@@ -5,6 +5,7 @@ import {
   getDoc, 
   setDoc, 
   updateDoc, 
+  runTransaction,
   query, 
   where, 
   orderBy, 
@@ -14,7 +15,9 @@ import {
 import { db } from './config';
 import { Purchase, PurchaseItem, ProcessPurchaseInput } from '../../types/purchase';
 import { Product, getProductStock, getTotalStock } from '../../types/product';
+import { LocationSelection } from '../../types/location';
 import { productService } from './productService';
+import { getArgentinaToday, toArgentinaDateString } from '../../utils/dateUtils';
 
 const PURCHASES_COLLECTION = 'purchases';
 const PURCHASE_ITEMS_COLLECTION = 'purchase_items';
@@ -144,8 +147,10 @@ export const purchaseService = {
       updatedProducts.push(updatedProd);
     }
 
+    const operatingDate = getArgentinaToday();
     const newPurchase: Purchase = {
       id: purchaseId,
+      date: operatingDate,
       providerId: input.providerId,
       providerName: input.providerName,
       createdAt: nowIso,
@@ -163,9 +168,11 @@ export const purchaseService = {
       const purchaseRef = doc(db, PURCHASES_COLLECTION, purchaseId);
       batch.set(purchaseRef, {
         id: newPurchase.id,
+        date: operatingDate,
         providerId: newPurchase.providerId,
         providerName: newPurchase.providerName,
         createdAt: serverTimestamp(),
+        createdAtIso: nowIso,
         totalAmount: newPurchase.totalAmount,
         totalItemsCount: newPurchase.totalItemsCount,
         itemsCount: newPurchase.items.length,
@@ -327,6 +334,307 @@ export const purchaseService = {
       lastPurchase,
       bestCost,
     };
-  }
+  },
+
+  /**
+   * Fetch all purchases ordered by date descending, optionally filtered by locationId
+   */
+  async getPurchases(locationId?: LocationSelection): Promise<Purchase[]> {
+    try {
+      const q = query(
+        collection(db, PURCHASES_COLLECTION),
+        orderBy('createdAt', 'desc')
+      );
+      const querySnapshot = await getDocs(q);
+      const purchases: Purchase[] = [];
+      const local = getLocalPurchases();
+      const localMap = new Map<string, Purchase>(local.map((p) => [p.id, p]));
+
+      querySnapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        const purLoc = data.locationId || 'aimogasta';
+        if (!locationId || locationId === 'all' || purLoc === locationId) {
+          const localMatch = localMap.get(docSnap.id);
+          purchases.push({
+            id: docSnap.id,
+            date: data.date || toArgentinaDateString(data.createdAt?.toDate ? data.createdAt.toDate() : data.createdAt) || getArgentinaToday(),
+            providerId: data.providerId || '',
+            providerName: data.providerName || 'Proveedor',
+            locationId: purLoc,
+            createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : (data.createdAt || new Date().toISOString()),
+            totalAmount: data.totalAmount || 0,
+            totalItemsCount: data.totalItemsCount || data.itemsCount || 0,
+            items: (localMatch && localMatch.items && localMatch.items.length > 0) ? localMatch.items : (data.items || []),
+            status: data.status || undefined,
+            cancelledAt: data.cancelledAtIso || (data.cancelledAt?.toDate ? data.cancelledAt.toDate().toISOString() : undefined),
+            cancellationReason: data.cancellationReason || undefined,
+          });
+        }
+      });
+
+      // Also merge any local purchases not present in querySnapshot
+      for (const locP of local) {
+        if (!purchases.some((p) => p.id === locP.id)) {
+          const pLoc = locP.locationId || 'aimogasta';
+          if (!locationId || locationId === 'all' || pLoc === locationId) {
+            purchases.push(locP);
+          }
+        }
+      }
+
+      purchases.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      saveLocalPurchases(purchases);
+      return purchases;
+    } catch (err) {
+      console.warn('Error al obtener compras de Firestore, usando cache local:', err);
+      const local = getLocalPurchases();
+      const filtered = (!locationId || locationId === 'all')
+        ? local
+        : local.filter((p) => (p.locationId || 'aimogasta') === locationId);
+      return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    }
+  },
+
+  /**
+   * Get single purchase by ID, including its purchase items
+   */
+  async getPurchaseById(purchaseId: string): Promise<Purchase | null> {
+    const local = getLocalPurchases();
+    const foundLocal = local.find((p) => p.id === purchaseId);
+    if (foundLocal && foundLocal.items && foundLocal.items.length > 0) {
+      return foundLocal;
+    }
+
+    try {
+      const docRef = doc(db, PURCHASES_COLLECTION, purchaseId);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        // Load items for this purchase
+        const itemsQuery = query(
+          collection(db, PURCHASE_ITEMS_COLLECTION),
+          where('purchaseId', '==', purchaseId)
+        );
+        const itemsSnap = await getDocs(itemsQuery);
+        const items: PurchaseItem[] = [];
+        itemsSnap.forEach((iSnap) => {
+          const iData = iSnap.data();
+          items.push({
+            id: iSnap.id,
+            productId: iData.productId,
+            barcode: iData.barcode || '',
+            name: iData.name || '',
+            brand: iData.brand || '',
+            presentation: iData.presentation || '',
+            category: iData.category || '',
+            providerId: iData.providerId || data.providerId,
+            providerName: iData.providerName || data.providerName,
+            purchaseId: purchaseId,
+            quantity: iData.quantity || 0,
+            unitCost: iData.unitCost || 0,
+            totalCost: iData.totalCost || 0,
+            previousCost: iData.previousCost,
+            newCost: iData.newCost || iData.unitCost || 0,
+            previousSalePrice: iData.previousSalePrice,
+            suggestedSalePrice: iData.suggestedSalePrice || 0,
+            finalSalePrice: iData.finalSalePrice || 0,
+            purchaseDate: iData.purchaseDate?.toDate ? iData.purchaseDate.toDate().toISOString() : (iData.purchaseDate || data.createdAt || new Date().toISOString()),
+            locationId: iData.locationId || data.locationId || 'aimogasta',
+          });
+        });
+
+        const purchase: Purchase = {
+          id: docSnap.id,
+          providerId: data.providerId || '',
+          providerName: data.providerName || 'Proveedor',
+          locationId: data.locationId || 'aimogasta',
+          createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : (data.createdAt || new Date().toISOString()),
+          totalAmount: data.totalAmount || 0,
+          totalItemsCount: data.totalItemsCount || items.reduce((acc, curr) => acc + (curr.quantity || 0), 0),
+          items: items.length > 0 ? items : (foundLocal?.items || []),
+          status: data.status || undefined,
+          cancelledAt: data.cancelledAtIso || (data.cancelledAt?.toDate ? data.cancelledAt.toDate().toISOString() : undefined),
+          cancellationReason: data.cancellationReason || undefined,
+        };
+
+        return purchase;
+      }
+    } catch (err) {
+      console.warn('Error al obtener compra por ID de Firestore:', err);
+    }
+
+    return foundLocal || null;
+  },
+
+  /**
+   * Atomically cancel a merchandise purchase / income:
+   * 1. Checks if purchase is already cancelled.
+   * 2. CRITICAL PRE-VALIDATION: Ensures every product has enough stock in the target location
+   *    to revert the quantity. If any product has insufficient stock, it rejects the entire operation
+   *    with an explanatory message (All-or-Nothing).
+   * 3. Atomically subtracts the added stock from each product in Firestore.
+   * 4. Marks purchase and associated purchase_items as CANCELLED.
+   * 5. Updates local caches.
+   */
+  async cancelPurchase(purchaseId: string, reason: string): Promise<Purchase> {
+    if (!purchaseId) throw new Error('ID de ingreso de mercadería no válido');
+    if (!reason?.trim()) throw new Error('Debe proporcionar un motivo de anulación');
+
+    const cleanReason = reason.trim();
+    const nowIso = new Date().toISOString();
+
+    // Fetch existing purchase details first
+    const purchRef = doc(db, PURCHASES_COLLECTION, purchaseId);
+    const existingSnap = await getDoc(purchRef);
+    if (!existingSnap.exists()) {
+      throw new Error(`No se encontró el ingreso de mercadería (${purchaseId})`);
+    }
+
+    const existingData = existingSnap.data();
+    if (existingData.status === 'CANCELLED') {
+      throw new Error('Este ingreso de mercadería ya fue anulado previamente.');
+    }
+
+    // Load items either from purchase document or purchase_items collection
+    let items: PurchaseItem[] = existingData.items || [];
+    if (items.length === 0) {
+      const itemsQ = query(
+        collection(db, PURCHASE_ITEMS_COLLECTION),
+        where('purchaseId', '==', purchaseId)
+      );
+      const itemsSnap = await getDocs(itemsQ);
+      itemsSnap.forEach((docSnap) => {
+        items.push({ id: docSnap.id, ...(docSnap.data() as any) });
+      });
+    }
+
+    const locKey = existingData.locationId || 'aimogasta';
+    let returnedPurchase: Purchase | null = null;
+    const updatedProducts: Product[] = [];
+
+    await runTransaction(db, async (transaction) => {
+      // Re-read purchase inside transaction
+      const pDoc = await transaction.get(purchRef);
+      if (!pDoc.exists()) {
+        throw new Error(`No se encontró el ingreso de mercadería (${purchaseId})`);
+      }
+      if (pDoc.data()?.status === 'CANCELLED') {
+        throw new Error('Este ingreso de mercadería ya fue anulado previamente.');
+      }
+
+      // Read all products and perform All-or-Nothing stock validation
+      const productDocs: { ref: any; item: PurchaseItem; data: Product; currentLocStock: number }[] = [];
+
+      for (const item of items) {
+        if (!item.productId) continue;
+        const prodRef = doc(db, PRODUCTS_COLLECTION, item.productId);
+        const prodSnap = await transaction.get(prodRef);
+        if (!prodSnap.exists()) {
+          throw new Error(`El producto con ID "${item.productId}" no existe en el catálogo.`);
+        }
+
+        const prodData = prodSnap.data() as Product;
+        const currentLocStock = getProductStock(prodData, locKey);
+
+        if (currentLocStock < item.quantity) {
+          const locName = locKey === 'olascoaga' ? 'Olascoaga' : 'Aimogasta';
+          throw new Error(
+            `No es posible anular el ingreso: Stock insuficiente para revertir (se requieren ${item.quantity} unidades de "${prodData.name}", disponibles ${currentLocStock} en ${locName}).`
+          );
+        }
+
+        productDocs.push({
+          ref: prodRef,
+          item,
+          data: prodData,
+          currentLocStock,
+        });
+      }
+
+      // All products have sufficient stock -> execute writes
+      for (const { ref: prodRef, item, data: prodData, currentLocStock } of productDocs) {
+        const newLocStock = Math.max(0, currentLocStock - item.quantity);
+        const legacyStock = prodData.stockQuantity ?? (prodData as any).stock ?? 0;
+
+        const stockByLocation = prodData.stockByLocation && typeof prodData.stockByLocation === 'object'
+          ? { ...prodData.stockByLocation, [locKey]: newLocStock }
+          : { 
+              aimogasta: locKey === 'aimogasta' ? newLocStock : legacyStock, 
+              olascoaga: locKey === 'olascoaga' ? newLocStock : 0 
+            };
+
+        const newTotalStock = (stockByLocation.aimogasta || 0) + (stockByLocation.olascoaga || 0);
+
+        transaction.update(prodRef, {
+          stockByLocation,
+          stockQuantity: newTotalStock,
+          updatedAt: serverTimestamp(),
+        });
+
+        updatedProducts.push({
+          ...prodData,
+          stockByLocation,
+          stockQuantity: newTotalStock,
+          updatedAt: nowIso,
+        });
+      }
+
+      // Mark purchase as CANCELLED
+      transaction.update(purchRef, {
+        status: 'CANCELLED',
+        cancelledAt: serverTimestamp(),
+        cancelledAtIso: nowIso,
+        cancellationReason: cleanReason,
+      });
+
+      returnedPurchase = {
+        id: purchaseId,
+        providerId: existingData.providerId || '',
+        providerName: existingData.providerName || 'Proveedor',
+        locationId: locKey,
+        createdAt: existingData.createdAt?.toDate ? existingData.createdAt.toDate().toISOString() : (existingData.createdAt || nowIso),
+        totalAmount: existingData.totalAmount || 0,
+        totalItemsCount: existingData.totalItemsCount || items.reduce((a, b) => a + (b.quantity || 0), 0),
+        items,
+        status: 'CANCELLED',
+        cancelledAt: nowIso,
+        cancellationReason: cleanReason,
+      };
+    });
+
+    // Update local caches
+    if (returnedPurchase) {
+      const local = getLocalPurchases();
+      const idx = local.findIndex(p => p.id === purchaseId);
+      if (idx >= 0) {
+        local[idx] = returnedPurchase;
+      } else {
+        local.unshift(returnedPurchase);
+      }
+      saveLocalPurchases(local);
+
+      // Update local purchase items
+      const localItems = getLocalPurchaseItems();
+      let itemsUpdated = false;
+      for (const item of localItems) {
+        if (item.purchaseId === purchaseId) {
+          item.status = 'CANCELLED';
+          item.cancelledAt = nowIso;
+          item.cancellationReason = cleanReason;
+          itemsUpdated = true;
+        }
+      }
+      if (itemsUpdated) {
+        saveLocalPurchaseItems(localItems);
+      }
+
+      // Update local product cache
+      for (const p of updatedProducts) {
+        productService.updateLocalProduct(p);
+      }
+    }
+
+    return returnedPurchase!;
+  },
 };
 

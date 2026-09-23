@@ -1,17 +1,21 @@
 import { 
   collection, 
   doc, 
+  getDoc,
   getDocs, 
   setDoc, 
   updateDoc, 
   deleteDoc,
+  runTransaction,
   query, 
+  where,
   orderBy, 
   serverTimestamp 
 } from 'firebase/firestore';
 import { db } from './config';
 import { Expense, CreateExpenseInput, UpdateExpenseInput } from '../../types/expense';
 import { LocationSelection } from '../../types/location';
+import { toArgentinaDateString, getArgentinaToday, getArgentinaCurrentMonth } from '../../utils/dateUtils';
 
 const EXPENSES_COLLECTION = 'expenses';
 const LOCAL_EXPENSES_KEY = 'despensa_stock_local_expenses';
@@ -58,7 +62,7 @@ export const expenseService = {
       category: input.category,
       description: input.description.trim(),
       amount: input.amount,
-      date: input.date || nowIso.split('T')[0],
+      date: input.date || getArgentinaToday(),
       paymentMethod: input.paymentMethod || 'cash',
       locationId: targetLocationKey,
       notes: input.notes?.trim() || '',
@@ -110,8 +114,8 @@ export const expenseService = {
       querySnapshot.forEach((docSnap) => {
         const data = docSnap.data();
         let dateStr = data.date;
-        if (!dateStr && data.createdAt?.toDate) {
-          dateStr = data.createdAt.toDate().toISOString().split('T')[0];
+        if (!dateStr && (data.createdAt || data.createdAtIso)) {
+          dateStr = toArgentinaDateString(data.createdAt?.toDate ? data.createdAt.toDate() : (data.createdAt || data.createdAtIso));
         }
 
         const expLocation = data.locationId || 'aimogasta';
@@ -122,13 +126,16 @@ export const expenseService = {
             category: data.category || 'Otros',
             description: data.description || '',
             amount: data.amount || 0,
-            date: dateStr || new Date().toISOString().split('T')[0],
+            date: dateStr || getArgentinaToday(),
             paymentMethod: data.paymentMethod || 'cash',
             locationId: expLocation,
             notes: data.notes || '',
             recurrent: Boolean(data.recurrent),
             createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : (data.createdAt || new Date().toISOString()),
             updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : (data.updatedAt || new Date().toISOString()),
+            status: data.status || undefined,
+            cancelledAt: data.cancelledAtIso || (data.cancelledAt?.toDate ? data.cancelledAt.toDate().toISOString() : undefined),
+            cancellationReason: data.cancellationReason || undefined,
           });
         }
       });
@@ -201,6 +208,131 @@ export const expenseService = {
   },
 
   /**
+   * Cancel an existing expense atomically:
+   * 1. Validates that expense exists and is not already cancelled.
+   * 2. Cancels any linked cash movement (in cash_movements).
+   * 3. Sets expense status to CANCELLED with cancelledAt and reason.
+   * 4. Updates local caches.
+   */
+  async cancelExpense(expenseId: string, reason: string): Promise<Expense> {
+    if (!expenseId) throw new Error('ID de gasto no válido');
+    if (!reason?.trim()) throw new Error('Debe proporcionar un motivo de anulación');
+
+    const cleanReason = reason.trim();
+    const nowIso = new Date().toISOString();
+
+    // Look for corresponding cash movement
+    let existingCashMovRef: any = null;
+    const directCashRef = doc(db, 'cash_movements', `mov_cash_expense_${expenseId}`);
+    const directSnap = await getDoc(directCashRef);
+    if (directSnap.exists()) {
+      existingCashMovRef = directCashRef;
+    } else {
+      const cashQ = query(
+        collection(db, 'cash_movements'),
+        where('sourceType', '==', 'EXPENSE'),
+        where('sourceId', '==', expenseId)
+      );
+      const cashSnap = await getDocs(cashQ);
+      if (!cashSnap.empty) {
+        existingCashMovRef = cashSnap.docs[0].ref;
+      }
+    }
+
+    let returnedExpense: Expense | null = null;
+
+    await runTransaction(db, async (transaction) => {
+      const expRef = doc(db, EXPENSES_COLLECTION, expenseId);
+      const expDoc = await transaction.get(expRef);
+      if (!expDoc.exists()) {
+        throw new Error(`No se encontró el registro de gasto (${expenseId})`);
+      }
+
+      const expData = expDoc.data();
+      if (expData.status === 'CANCELLED') {
+        throw new Error('Este gasto ya fue anulado previamente.');
+      }
+
+      // Check cash movement inside transaction
+      let cashSnapInTx: any = null;
+      if (existingCashMovRef) {
+        cashSnapInTx = await transaction.get(existingCashMovRef);
+      }
+
+      // --- WRITES ---
+      // A: If cash movement exists and active, mark CANCELLED
+      if (existingCashMovRef && cashSnapInTx && cashSnapInTx.exists()) {
+        transaction.update(existingCashMovRef, {
+          status: 'CANCELLED',
+          cancelledAt: serverTimestamp(),
+          cancelledAtIso: nowIso,
+          cancellationReason: cleanReason,
+        });
+      }
+
+      // B: Mark expense as CANCELLED
+      transaction.update(expRef, {
+        status: 'CANCELLED',
+        cancelledAt: serverTimestamp(),
+        cancelledAtIso: nowIso,
+        cancellationReason: cleanReason,
+        updatedAt: serverTimestamp(),
+      });
+
+      let dateStr = expData.date;
+      if (expData.date?.toDate) {
+        dateStr = toArgentinaDateString(expData.date.toDate());
+      }
+
+      returnedExpense = {
+        id: expenseId,
+        category: expData.category || 'Otros',
+        description: expData.description || '',
+        amount: expData.amount || 0,
+        date: dateStr || getArgentinaToday(),
+        paymentMethod: expData.paymentMethod || 'cash',
+        locationId: expData.locationId || 'aimogasta',
+        notes: expData.notes || '',
+        recurrent: Boolean(expData.recurrent),
+        createdAt: expData.createdAt?.toDate ? expData.createdAt.toDate().toISOString() : (expData.createdAt || nowIso),
+        updatedAt: nowIso,
+        status: 'CANCELLED',
+        cancelledAt: nowIso,
+        cancellationReason: cleanReason,
+      };
+    });
+
+    // Local caches update
+    if (returnedExpense) {
+      const local = getLocalExpenses();
+      const idx = local.findIndex(e => e.id === expenseId);
+      if (idx >= 0) {
+        local[idx] = returnedExpense;
+      } else {
+        local.unshift(returnedExpense);
+      }
+      saveLocalExpenses(local);
+
+      // Also update local cash movement if present
+      try {
+        const rawCash = localStorage.getItem('despensa_stock_local_cash_movements');
+        if (rawCash) {
+          const localCash = JSON.parse(rawCash);
+          const cIdx = localCash.findIndex((c: any) => c.sourceType === 'EXPENSE' && c.sourceId === expenseId);
+          if (cIdx >= 0) {
+            localCash[cIdx].status = 'CANCELLED';
+            localCash[cIdx].cancelledAt = nowIso;
+            localCash[cIdx].cancellationReason = cleanReason;
+            localStorage.setItem('despensa_stock_local_cash_movements', JSON.stringify(localCash));
+          }
+        }
+      } catch {}
+    }
+
+    return returnedExpense!;
+  },
+
+  /**
    * Delete an expense by ID.
    */
   async deleteExpense(id: string): Promise<void> {
@@ -222,13 +354,14 @@ export const expenseService = {
    * Filtered by locationId if provided.
    */
   async getMerchandisePurchases(filter?: 'today' | 'month' | 'all', locationId?: LocationSelection): Promise<number> {
-    let purchases: { totalAmount: number; createdAt: string; locationId?: string }[] = [];
+    let purchases: { totalAmount: number; createdAt: string; purchaseDate?: string; locationId?: string; status?: string }[] = [];
 
     try {
       const q = query(collection(db, 'purchases'), orderBy('createdAt', 'desc'));
       const querySnapshot = await getDocs(q);
       querySnapshot.forEach((docSnap) => {
         const data = docSnap.data();
+        if (data.status === 'CANCELLED') return; // Exclude cancelled purchases
         let dateStr = data.createdAt;
         if (data.createdAt?.toDate) {
           dateStr = data.createdAt.toDate().toISOString();
@@ -236,7 +369,9 @@ export const expenseService = {
         purchases.push({
           totalAmount: data.totalAmount || 0,
           createdAt: dateStr || new Date().toISOString(),
+          purchaseDate: data.purchaseDate,
           locationId: data.locationId || 'aimogasta',
+          status: data.status,
         });
       });
     } catch (err) {
@@ -244,6 +379,7 @@ export const expenseService = {
       try {
         const raw = localStorage.getItem(LOCAL_PURCHASES_KEY);
         if (raw) purchases = JSON.parse(raw);
+        purchases = purchases.filter(p => p.status !== 'CANCELLED');
       } catch {}
     }
 
@@ -251,12 +387,11 @@ export const expenseService = {
       purchases = purchases.filter(p => (p.locationId || 'aimogasta') === locationId);
     }
 
-    const now = new Date();
-    const todayStr = now.toISOString().split('T')[0];
-    const currentMonthPrefix = todayStr.substring(0, 7); // YYYY-MM
+    const todayStr = getArgentinaToday();
+    const currentMonthPrefix = getArgentinaCurrentMonth(); // YYYY-MM
 
     return purchases.reduce((acc, p) => {
-      const pDateStr = new Date(p.createdAt).toISOString().split('T')[0];
+      const pDateStr = toArgentinaDateString(p.purchaseDate || p.createdAt) || getArgentinaToday();
 
       if (filter === 'today') {
         if (pDateStr === todayStr) return acc + p.totalAmount;
@@ -270,6 +405,43 @@ export const expenseService = {
 
       return acc + p.totalAmount;
     }, 0);
-  }
+  },
+
+  /**
+   * Get single expense by ID
+   */
+  async getExpenseById(id: string): Promise<Expense | null> {
+    const local = getLocalExpenses();
+    const foundLocal = local.find((e) => e.id === id);
+    if (foundLocal) return foundLocal;
+
+    try {
+      const expRef = doc(db, EXPENSES_COLLECTION, id);
+      const snap = await getDoc(expRef);
+      if (snap.exists()) {
+        const data = snap.data();
+        let dateStr = data.date;
+        if (!dateStr && (data.createdAt || data.createdAtIso)) {
+          dateStr = toArgentinaDateString(data.createdAt?.toDate ? data.createdAt.toDate() : (data.createdAt || data.createdAtIso));
+        }
+        return {
+          id: snap.id,
+          category: data.category || 'Otros',
+          description: data.description || '',
+          amount: data.amount || 0,
+          date: dateStr || getArgentinaToday(),
+          paymentMethod: data.paymentMethod || 'cash',
+          locationId: data.locationId || 'aimogasta',
+          notes: data.notes || '',
+          recurrent: Boolean(data.recurrent),
+          createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : (data.createdAt || new Date().toISOString()),
+          updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : (data.updatedAt || new Date().toISOString()),
+        };
+      }
+    } catch (err) {
+      console.warn('Error fetching expense by ID:', err);
+    }
+    return null;
+  },
 };
 
