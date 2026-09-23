@@ -86,6 +86,8 @@ export const CashMovementDetailModal: React.FC<CashMovementDetailModalProps> = (
         return <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full bg-sky-50 text-sky-700 border border-sky-200">📱 Mercado Pago</span>;
       case 'transfer':
         return <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">🏦 Transferencia</span>;
+      case 'credit':
+        return <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200">🤝 Fiado / Cta. Cte.</span>;
       default:
         return <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200">{method || 'Otro'}</span>;
     }
@@ -150,20 +152,31 @@ export const CashMovementDetailModal: React.FC<CashMovementDetailModalProps> = (
           )}
 
           {/* Amount Hero Banner */}
-          <div className={`p-4 rounded-2xl border text-center ${
-            isIncome ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200'
-          }`}>
-            <span className={`text-[10px] font-black uppercase tracking-wider block ${
-              isIncome ? 'text-emerald-800' : 'text-rose-800'
-            }`}>
-              {isIncome ? 'Ingreso de Caja (+)' : 'Egreso de Caja (-)'}
-            </span>
-            <div className={`text-3xl font-black mt-0.5 ${
-              isIncome ? 'text-emerald-900' : 'text-rose-900'
-            }`}>
-              {isIncome ? '+' : '-'}${movement.amount.toLocaleString('es-AR')}
+          {movement.paymentMethod === 'credit' ? (
+            <div className="p-4 rounded-2xl border text-center bg-amber-50 border-amber-200">
+              <span className="text-[10px] font-black uppercase tracking-wider block text-amber-800">
+                Venta a Cuenta Corriente (Fiado) — No representó ingreso de dinero en caja
+              </span>
+              <div className="text-3xl font-black mt-0.5 text-amber-900">
+                ${movement.amount.toLocaleString('es-AR')}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className={`p-4 rounded-2xl border text-center ${
+              isIncome ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200'
+            }`}>
+              <span className={`text-[10px] font-black uppercase tracking-wider block ${
+                isIncome ? 'text-emerald-800' : 'text-rose-800'
+              }`}>
+                {isIncome ? 'Ingreso de Caja (+)' : 'Egreso de Caja (-)'}
+              </span>
+              <div className={`text-3xl font-black mt-0.5 ${
+                isIncome ? 'text-emerald-900' : 'text-rose-900'
+              }`}>
+                {isIncome ? '+' : '-'}${movement.amount.toLocaleString('es-AR')}
+              </div>
+            </div>
+          )}
 
           {/* Connected Action Button if applicable */}
           {movement.sourceType === 'SALE' && movement.sourceId && handleViewSale && (

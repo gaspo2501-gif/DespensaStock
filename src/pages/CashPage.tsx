@@ -13,6 +13,7 @@ import { CashClosureDetailModal } from '../components/modals/CashClosureDetailMo
 import { SaleDetailModal } from '../components/modals/SaleDetailModal';
 import { ExpenseDetailModal } from '../components/modals/ExpenseDetailModal';
 import { PaymentDetailModal } from '../components/modals/PaymentDetailModal';
+import { useLocation } from '../context/LocationContext';
 import { 
   formatLocalDate, 
   formatLocalDateTime,
@@ -49,7 +50,9 @@ import {
   PieChart,
   ExternalLink,
   ArrowLeftRight,
-  Receipt
+  Receipt,
+  Store,
+  UserCheck
 } from 'lucide-react';
 
 interface CashPageProps {
@@ -57,6 +60,7 @@ interface CashPageProps {
 }
 
 export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' }) => {
+  const { currentLocation } = useLocation();
   const [activeSubTab, setActiveSubTab] = useState<'movements' | 'expenses' | 'closures'>(initialSubTab);
   const [summary, setSummary] = useState<CashBalanceSummary>({
     cashBalance: 0,
@@ -67,6 +71,7 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
     todayIncome: 0,
     todayExpense: 0,
     todayNet: 0,
+    todaySales: 0,
   });
 
   const [movements, setMovements] = useState<CashMovement[]>([]);
@@ -117,9 +122,9 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
     setLoading(true);
     try {
       const [sum, movs, clos] = await Promise.all([
-        cashService.getCashSummary(),
-        cashService.getCashMovements(),
-        cashService.getCashClosures(),
+        cashService.getCashSummary(currentLocation),
+        cashService.getCashMovements(currentLocation),
+        cashService.getCashClosures(currentLocation),
       ]);
       setSummary(sum);
       setMovements(movs);
@@ -129,7 +134,7 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [currentLocation]);
 
   useEffect(() => {
     loadData();
@@ -248,7 +253,9 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
       if (methodFilter !== 'all' && mov.paymentMethod !== methodFilter) return false;
 
       // 3. Type filter
-      if (typeFilter !== 'all' && mov.type !== typeFilter) return false;
+      if (typeFilter === 'INCOME' && (mov.type !== 'INCOME' || mov.paymentMethod === 'credit')) return false;
+      if (typeFilter === 'EXPENSE' && mov.type !== 'EXPENSE') return false;
+      if (typeFilter === 'CREDIT' && mov.paymentMethod !== 'credit') return false;
 
       return true;
     });
@@ -278,6 +285,13 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
             <span>Transferencia</span>
           </span>
         );
+      case 'credit':
+        return (
+          <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+            <UserCheck className="w-3 h-3 text-amber-600" />
+            <span>Fiado / Cta. Cte.</span>
+          </span>
+        );
       default:
         return (
           <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
@@ -292,13 +306,13 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
   const renderSourceBadge = (sourceType: string) => {
     switch (sourceType) {
       case 'SALE':
-        return <span className="text-[10px] text-slate-500 font-semibold bg-slate-100 px-2 py-0.5 rounded-md">Venta</span>;
+        return <span className="text-[10px] text-slate-600 font-semibold bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">Venta</span>;
       case 'CUSTOMER_PAYMENT':
-        return <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-md">Pago Cliente</span>;
+        return <span className="text-[10px] text-indigo-700 font-semibold bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100">Cobro Cta. Cte.</span>;
       case 'EXPENSE':
-        return <span className="text-[10px] text-rose-700 font-semibold bg-rose-50 px-2 py-0.5 rounded-md">Gasto</span>;
+        return <span className="text-[10px] text-rose-700 font-semibold bg-rose-50 px-2 py-0.5 rounded-md border border-rose-100">Gasto</span>;
       default:
-        return <span className="text-[10px] text-purple-700 font-semibold bg-purple-50 px-2 py-0.5 rounded-md">Manual</span>;
+        return <span className="text-[10px] text-purple-700 font-semibold bg-purple-50 px-2 py-0.5 rounded-md border border-purple-100">Manual</span>;
     }
   };
 
@@ -608,7 +622,17 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
           </span>
         </div>
 
-        <div className="grid grid-cols-3 gap-3 text-center">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 text-center">
+          <div className="p-3 bg-blue-50/70 border border-blue-100 rounded-2xl space-y-1">
+            <p className="text-[10px] font-extrabold uppercase tracking-wider text-blue-800 flex items-center justify-center gap-1">
+              <Store className="w-3.5 h-3.5 text-blue-600" /> Ventas Hoy
+            </p>
+            <p className="text-lg font-black font-mono text-blue-700">
+              ${summary.todaySales.toLocaleString('es-AR')}
+            </p>
+            <p className="text-[10px] text-blue-600/80 font-medium">Actividad comercial</p>
+          </div>
+
           <div className="p-3 bg-emerald-50/70 border border-emerald-100 rounded-2xl space-y-1">
             <p className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-800 flex items-center justify-center gap-1">
               <ArrowUpRight className="w-3.5 h-3.5 text-emerald-600" /> Ingresos Hoy
@@ -616,6 +640,7 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
             <p className="text-lg font-black font-mono text-emerald-700">
               +${summary.todayIncome.toLocaleString('es-AR')}
             </p>
+            <p className="text-[10px] text-emerald-600/80 font-medium">Dinero ingresado</p>
           </div>
 
           <div className="p-3 bg-rose-50/70 border border-rose-100 rounded-2xl space-y-1">
@@ -625,6 +650,7 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
             <p className="text-lg font-black font-mono text-rose-700">
               -${summary.todayExpense.toLocaleString('es-AR')}
             </p>
+            <p className="text-[10px] text-rose-600/80 font-medium">Gastos operativos</p>
           </div>
 
           <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-1">
@@ -634,6 +660,7 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
             <p className={`text-lg font-black font-mono ${summary.todayNet >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
               {summary.todayNet >= 0 ? '+' : ''}${summary.todayNet.toLocaleString('es-AR')}
             </p>
+            <p className="text-[10px] text-slate-500 font-medium">Balance en caja</p>
           </div>
         </div>
       </div>
@@ -714,6 +741,7 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
             <option value="cash">Efectivo</option>
             <option value="mercado_pago">Mercado Pago</option>
             <option value="transfer">Transferencia</option>
+            <option value="credit">Fiado / Cta. Cte.</option>
             <option value="other">Otro</option>
           </select>
 
@@ -726,6 +754,7 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
             <option value="all">Tipo: Todos</option>
             <option value="INCOME">Solo Ingresos (+)</option>
             <option value="EXPENSE">Solo Egresos (-)</option>
+            <option value="CREDIT">Solo Fiados (Cta. Cte.)</option>
           </select>
         </div>
 
@@ -747,23 +776,38 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
           <div className="space-y-2">
             {filteredMovements.map((mov) => {
               const isIncome = mov.type === 'INCOME';
+              const isFiado = mov.paymentMethod === 'credit';
 
               return (
                 <div
                   key={mov.id}
-                  onClick={() => setSelectedMovementForDetail(mov)}
+                  onClick={() => {
+                    if (mov.sourceType === 'SALE') {
+                      setLinkedSaleId(mov.sourceId);
+                    } else if (mov.sourceType === 'CUSTOMER_PAYMENT') {
+                      setLinkedPaymentId(mov.sourceId);
+                    } else {
+                      setSelectedMovementForDetail(mov);
+                    }
+                  }}
                   className="p-3.5 bg-slate-50/70 border border-slate-200/80 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-white hover:border-emerald-300 hover:shadow-xs transition-all shadow-2xs cursor-pointer group"
                   title="Hacé clic para ver el detalle completo de este movimiento"
                 >
                   <div className="flex items-center gap-3">
                     {/* Icon indicator */}
-                    <div
-                      className={`w-10 h-10 rounded-2xl shrink-0 flex items-center justify-center text-white font-black shadow-xs ${
-                        isIncome ? 'bg-emerald-600' : 'bg-rose-500'
-                      }`}
-                    >
-                      {isIncome ? <Plus className="w-5 h-5" /> : <Minus className="w-5 h-5" />}
-                    </div>
+                    {isFiado ? (
+                      <div className="w-10 h-10 rounded-2xl shrink-0 flex items-center justify-center text-amber-800 bg-amber-100/90 border border-amber-200 shadow-xs font-black">
+                        <Receipt className="w-5 h-5 text-amber-700" />
+                      </div>
+                    ) : (
+                      <div
+                        className={`w-10 h-10 rounded-2xl shrink-0 flex items-center justify-center text-white font-black shadow-xs ${
+                          isIncome ? 'bg-emerald-600' : 'bg-rose-500'
+                        }`}
+                      >
+                        {isIncome ? <Plus className="w-5 h-5" /> : <Minus className="w-5 h-5" />}
+                      </div>
+                    )}
 
                     <div className="space-y-0.5">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -780,9 +824,20 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
                   </div>
 
                   <div className="flex items-center sm:flex-col sm:items-end justify-between gap-1 shrink-0">
-                    <p className={`text-base font-black font-mono ${isIncome ? 'text-emerald-700' : 'text-rose-600'}`}>
-                      {isIncome ? '+' : '-'}${mov.amount.toLocaleString('es-AR')}
-                    </p>
+                    {isFiado ? (
+                      <div className="text-right">
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 block sm:inline-block">
+                          FIADO (Sin ingreso)
+                        </span>
+                        <p className="text-base font-black font-mono text-slate-700 sm:mt-0.5">
+                          ${mov.amount.toLocaleString('es-AR')}
+                        </p>
+                      </div>
+                    ) : (
+                      <p className={`text-base font-black font-mono ${isIncome ? 'text-emerald-700' : 'text-rose-600'}`}>
+                        {isIncome ? '+' : '-'}${mov.amount.toLocaleString('es-AR')}
+                      </p>
+                    )}
                     <span className="text-[10px] text-slate-400 font-bold group-hover:text-emerald-600 flex items-center gap-0.5 transition-colors">
                       <span>Ver detalle</span>
                       <ChevronRight className="w-3 h-3" />

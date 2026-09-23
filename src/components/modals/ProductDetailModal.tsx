@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Product, getStockForLocation, getTotalStock } from '../../types/product';
 import { 
   Package, 
@@ -32,7 +33,16 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   const cost = product.currentCost || product.lastCost || product.costPrice || 0;
   const categoryColor = getCategoryBadgeColor(product.category);
 
-  return (
+  // Lock background body scroll while modal is open and restore on unmount
+  useEffect(() => {
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, []);
+
+  return createPortal(
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-fadeIn">
       <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col my-auto max-h-[90dvh]">
         {/* Header */}
@@ -176,7 +186,6 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
           {onEditProduct ? (
             <button
               onClick={() => {
-                onClose();
                 onEditProduct(product);
               }}
               className="px-4 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors"
@@ -194,6 +203,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

@@ -1,10 +1,10 @@
 import React from 'react';
-import { ShoppingBasket, Download, WifiOff } from 'lucide-react';
+import { ShoppingBasket, Download, WifiOff, RefreshCw } from 'lucide-react';
 import { usePWA } from '../../hooks/usePWA';
 import { LocationSelector } from '../common/LocationSelector';
 
 export const Navbar: React.FC = () => {
-  const { isInstallable, isOnline, promptInstall } = usePWA();
+  const { isInstallable, isOnline, promptInstall, hasUpdate, updateApp, dismissUpdate } = usePWA();
 
   return (
     <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-md text-slate-900 border-b border-slate-200/80 shadow-2xs">
@@ -46,6 +46,18 @@ export const Navbar: React.FC = () => {
             </div>
           )}
 
+          {/* Update Available Quick Button */}
+          {hasUpdate && (
+            <button
+              onClick={updateApp}
+              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-all animate-pulse"
+              title="Actualizar a la última versión disponible"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Actualizar app</span>
+            </button>
+          )}
+
           {isInstallable && (
             <button
               onClick={promptInstall}
@@ -57,7 +69,30 @@ export const Navbar: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Discrete update notification banner */}
+      {hasUpdate && (
+        <div className="bg-slate-900 text-white px-4 py-2 text-xs flex items-center justify-between gap-3 shadow-inner border-t border-slate-800 animate-fadeIn">
+          <div className="flex items-center gap-2">
+            <RefreshCw className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Hay una nueva versión disponible de Despensa Stock.</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={updateApp}
+              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs transition-colors shadow-xs"
+            >
+              Actualizar
+            </button>
+            <button
+              onClick={dismissUpdate}
+              className="text-slate-400 hover:text-slate-200 text-xs font-medium"
+            >
+              Más tarde
+            </button>
+          </div>
+        </div>
+      )}
     </header>
   );
 };
-

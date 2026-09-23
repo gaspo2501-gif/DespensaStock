@@ -4,15 +4,6 @@ import App from './App.tsx';
 import { LocationProvider } from './context/LocationContext';
 import './index.css';
 
-// Register PWA Service Worker
-if ('serviceWorker' in navigator && import.meta.env.PROD) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch((err) => {
-      console.warn('PWA service worker registration failed:', err);
-    });
-  });
-}
-
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <LocationProvider>

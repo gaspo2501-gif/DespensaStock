@@ -1,6 +1,6 @@
 export type CashMovementType = 'INCOME' | 'EXPENSE';
 
-export type CashPaymentMethod = 'cash' | 'mercado_pago' | 'transfer' | 'other';
+export type CashPaymentMethod = 'cash' | 'mercado_pago' | 'transfer' | 'credit' | 'other';
 
 export type CashSourceType = 'SALE' | 'CUSTOMER_PAYMENT' | 'EXPENSE' | 'MANUAL';
 
@@ -46,4 +46,5 @@ export interface CashBalanceSummary {
   todayIncome: number;
   todayExpense: number;
   todayNet: number;
+  todaySales: number; // Total commercial activity today (cash, MP, transfer, credit/fiado)
 }

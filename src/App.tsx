@@ -16,6 +16,7 @@ import { CashPage } from './pages/CashPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { ProductDetail } from './components/product/ProductDetail';
 import { ProductForm } from './components/product/ProductForm';
+import { ProductEditModal } from './components/modals/ProductEditModal';
 import { Loader2, AlertCircle, RefreshCw } from 'lucide-react';
 
 export default function App() {
@@ -240,15 +241,16 @@ export default function App() {
 
       {/* Editing Product Modal Form */}
       {editingProduct && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <ProductForm
-            isEditing={true}
-            initialData={editingProduct}
-            source={editingProduct.source}
-            onSubmit={handleUpdateProductSubmit}
-            onCancel={() => setEditingProduct(null)}
-          />
-        </div>
+        <ProductEditModal
+          product={editingProduct}
+          allProducts={products}
+          onClose={() => setEditingProduct(null)}
+          onProductSaved={(updated) => {
+            handleProductSaved(updated);
+            setEditingProduct(null);
+            setSelectedProduct(updated);
+          }}
+        />
       )}
 
       {/* Manual Creation Modal Form */}

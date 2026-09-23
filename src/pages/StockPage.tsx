@@ -11,6 +11,7 @@ import { TransferHistoryModal } from '../components/modals/TransferHistoryModal'
 import { PurchaseDetailModal } from '../components/modals/PurchaseDetailModal';
 import { StockTransferDetailModal } from '../components/modals/StockTransferDetailModal';
 import { ProductDetailModal } from '../components/modals/ProductDetailModal';
+import { ProductEditModal } from '../components/modals/ProductEditModal';
 import { StockTransferRecord } from '../types/stockTransfer';
 import { productService } from '../services/firebase/productService';
 import { providerService } from '../services/firebase/providerService';
@@ -41,7 +42,8 @@ import {
   Eye, 
   PackagePlus, 
   Filter,
-  Check
+  Check,
+  Edit3
 } from 'lucide-react';
 
 interface StockPageProps {
@@ -87,6 +89,25 @@ export const StockPage: React.FC<StockPageProps> = ({
   const [selectedTransferForDetail, setSelectedTransferForDetail] = useState<StockTransferRecord | null>(null);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [showManualCreateModal, setShowManualCreateModal] = useState<boolean>(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 3500);
+  };
+
+  const openEditProduct = (product: Product) => {
+    setEditingProduct(product);
+  };
+
+  const handleProductEdited = (saved: Product) => {
+    onProductSaved(saved);
+    setEditingProduct(null);
+    setSelectedProductId(saved.id);
+    showToast('Producto actualizado correctamente');
+  };
 
   // Filter States for Products Catalog
   const [stockLevelFilter, setStockLevelFilter] = useState<'all' | 'zero' | 'low' | 'available'>('all');
@@ -566,6 +587,15 @@ export const StockPage: React.FC<StockPageProps> = ({
 
                 <div className="flex items-center gap-2 self-start sm:self-auto">
                   <button
+                    onClick={() => openEditProduct(activeProduct)}
+                    className="p-2 text-slate-600 hover:text-emerald-700 bg-slate-50 hover:bg-emerald-50 rounded-xl transition-colors border border-slate-200 text-xs font-bold flex items-center gap-1.5"
+                    title="Editar datos maestros del producto"
+                  >
+                    <Edit3 className="w-4 h-4 text-emerald-600" />
+                    <span>Editar</span>
+                  </button>
+
+                  <button
                     onClick={() => setShowDetailModal(true)}
                     className="p-2 text-slate-500 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 rounded-xl transition-colors border border-slate-200 text-xs font-bold flex items-center gap-1"
                     title="Ver ficha técnica completa"
@@ -845,7 +875,7 @@ export const StockPage: React.FC<StockPageProps> = ({
                         showActions={true}
                         onEdit={(e) => {
                           e.stopPropagation();
-                          setEditingProduct(product);
+                          openEditProduct(product);
                         }}
                       />
                     </div>
@@ -934,32 +964,36 @@ export const StockPage: React.FC<StockPageProps> = ({
         <ProductDetailModal
           product={activeProduct}
           onClose={() => setShowDetailModal(false)}
-          onEditProduct={(p) => setEditingProduct(p)}
+          onEditProduct={(p) => openEditProduct(p)}
         />
       )}
 
       {/* MODAL: EDIT PRODUCT FORM */}
       {editingProduct && (
-        <ProductForm
-          initialProduct={editingProduct}
-          onSave={(saved) => {
-            onProductSaved(saved);
-            setEditingProduct(null);
-          }}
-          onCancel={() => setEditingProduct(null)}
+        <ProductEditModal
+          product={editingProduct}
+          allProducts={products}
+          onClose={() => setEditingProduct(null)}
+          onProductSaved={handleProductEdited}
         />
       )}
 
       {/* MODAL: CREATE MANUAL PRODUCT FORM */}
       {showManualCreateModal && (
-        <ProductForm
-          onSave={(saved) => {
-            onProductSaved(saved);
-            setShowManualCreateModal(false);
-            handleSelectProduct(saved);
-          }}
-          onCancel={() => setShowManualCreateModal(false)}
-        />
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <ProductForm
+            isEditing={false}
+            source="manual"
+            onSubmit={async (input) => {
+              const saved = await productService.saveProduct(input);
+              onProductSaved(saved);
+              setShowManualCreateModal(false);
+              handleSelectProduct(saved);
+              showToast('Producto creado correctamente');
+            }}
+            onCancel={() => setShowManualCreateModal(false)}
+          />
+        </div>
       )}
 
       {/* MODAL: PURCHASE HISTORY */}
@@ -992,6 +1026,14 @@ export const StockPage: React.FC<StockPageProps> = ({
           transfer={selectedTransferForDetail}
           onClose={() => setSelectedTransferForDetail(null)}
         />
+      )}
+
+      {/* Floating discreet toast notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-[70] bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-2.5 text-xs font-bold border border-slate-700 animate-fadeIn">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span>{toastMessage}</span>
+        </div>
       )}
     </div>
   );

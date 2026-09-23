@@ -197,26 +197,27 @@ export const cashService = {
       }
     }
 
-    // 2. Consolidate non-fiado Sales (paymentMethod !== 'credit')
+    // 2. Consolidate Sales (both cash/MP/transfer AND fiado/credit)
     try {
       const sales = await salesService.getRecentSales(locationId);
       for (const sale of sales) {
-        if (sale.paymentMethod === 'credit') continue; // Fiado sales do NOT generate cash income
-
         const key = getSourceKey('SALE', sale.id);
         if (!movementMap.has(key)) {
-          const saleDateStr = toArgentinaDateString(sale.createdAt) || getArgentinaToday();
+          const saleDateStr = sale.date || toArgentinaDateString(sale.createdAt) || getArgentinaToday();
+          const isFiado = sale.paymentMethod === 'credit';
+          const customerInfo = sale.customerName ? ` (${sale.customerName})` : '';
+
           const synthMov: CashMovement = {
             id: `mov_cash_sale_${sale.id}`,
             type: 'INCOME',
             amount: sale.totalAmount,
             paymentMethod: (sale.paymentMethod as CashPaymentMethod) || 'cash',
-            description: `Venta #${sale.id.replace('sale_', '')}`,
+            description: `Venta #${sale.id.replace('sale_', '')}${customerInfo}`,
             date: saleDateStr,
             sourceType: 'SALE',
             sourceId: sale.id,
             locationId: sale.locationId || 'aimogasta',
-            notes: `${sale.totalItemsCount} ítems`,
+            notes: isFiado ? `Fiado / Cuenta corriente${customerInfo}` : `${sale.totalItemsCount} ítems`,
             createdAt: sale.createdAt || new Date().toISOString(),
             status: sale.status || undefined,
             cancelledAt: sale.cancelledAt || undefined,
@@ -342,6 +343,12 @@ export const cashService = {
 
     for (const mov of movements) {
       if (mov.status === 'CANCELLED') continue; // Exclude cancelled movements from cash balances and totals
+
+      // CRITICAL: Fiado / credit sales do NOT generate cash flow or affect financial balances!
+      if (mov.paymentMethod === 'credit') {
+        continue;
+      }
+
       const isIncome = mov.type === 'INCOME';
       const val = isIncome ? mov.amount : -mov.amount;
 
@@ -356,7 +363,7 @@ export const cashService = {
         otherBalance += val;
       }
 
-      // Today's summary
+      // Today's summary (strictly cash flow: dinero efectivamente ingresado)
       if (mov.date === todayStr) {
         if (isIncome) {
           todayIncome += mov.amount;
@@ -364,6 +371,21 @@ export const cashService = {
           todayExpense += mov.amount;
         }
       }
+    }
+
+    // Calculate today's commercial sales (cash + MP + transfer + fiado)
+    let todaySales = 0;
+    try {
+      const allSales = await salesService.getRecentSales(locationId);
+      for (const sale of allSales) {
+        if (sale.status === 'CANCELLED') continue;
+        const sDate = sale.date || toArgentinaDateString(sale.createdAt);
+        if (sDate === todayStr) {
+          todaySales += sale.totalAmount || 0;
+        }
+      }
+    } catch (err) {
+      console.warn('Error al calcular ventas hoy en getCashSummary:', err);
     }
 
     return {
@@ -375,6 +397,7 @@ export const cashService = {
       todayIncome,
       todayExpense,
       todayNet: todayIncome - todayExpense,
+      todaySales,
     };
   },
 
