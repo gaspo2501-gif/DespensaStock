@@ -73,10 +73,13 @@ export const SaleDetailModal: React.FC<SaleDetailModalProps> = ({
         return <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">💵 Efectivo</span>;
       case 'mercado_pago':
         return <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full bg-sky-50 text-sky-700 border border-sky-200">📱 Mercado Pago</span>;
+      case 'credit':
       case 'fiado':
         return <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 border border-purple-200">📒 Cuenta Corriente / Fiado</span>;
       case 'transfer':
         return <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">🏦 Transferencia</span>;
+      case 'mixed':
+        return <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-300">🔀 Pago Combinado</span>;
       default:
         return <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200">{method || 'Otro'}</span>;
     }
@@ -184,7 +187,7 @@ export const SaleDetailModal: React.FC<SaleDetailModalProps> = ({
                       <div className="mt-0.5">{getPaymentMethodBadge(sale.paymentMethod)}</div>
                     </div>
                   </div>
-                  {sale.paymentMethod === 'fiado' && sale.customerId && onViewCustomer && (
+                  {(sale.paymentMethod === 'fiado' || sale.paymentMethod === 'credit' || (sale.paymentBreakdown?.credit || 0) > 0) && sale.customerId && onViewCustomer && (
                     <button
                       onClick={() => {
                         onClose();
@@ -197,6 +200,49 @@ export const SaleDetailModal: React.FC<SaleDetailModalProps> = ({
                     </button>
                   )}
                 </div>
+
+                {/* Desglose de Pago Combinado */}
+                {sale.paymentBreakdown && (
+                  <div className="p-3 bg-amber-50/60 rounded-2xl border border-amber-200/80 sm:col-span-2 space-y-1.5 text-xs">
+                    <span className="text-[10px] uppercase font-black text-amber-800 tracking-wider block">
+                      Desglose de Cobro
+                    </span>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                      {(sale.paymentBreakdown.cash || 0) > 0 && (
+                        <div className="p-2 bg-white rounded-xl border border-amber-200/60">
+                          <span className="text-slate-400 font-bold block text-[10px]">💵 Efectivo</span>
+                          <span className="font-bold text-slate-800 font-mono">
+                            ${sale.paymentBreakdown.cash!.toLocaleString('es-AR')}
+                          </span>
+                        </div>
+                      )}
+                      {(sale.paymentBreakdown.mercado_pago || 0) > 0 && (
+                        <div className="p-2 bg-white rounded-xl border border-amber-200/60">
+                          <span className="text-slate-400 font-bold block text-[10px]">📱 Mercado Pago</span>
+                          <span className="font-bold text-slate-800 font-mono">
+                            ${sale.paymentBreakdown.mercado_pago!.toLocaleString('es-AR')}
+                          </span>
+                        </div>
+                      )}
+                      {(sale.paymentBreakdown.transfer || 0) > 0 && (
+                        <div className="p-2 bg-white rounded-xl border border-amber-200/60">
+                          <span className="text-slate-400 font-bold block text-[10px]">🏦 Transferencia</span>
+                          <span className="font-bold text-slate-800 font-mono">
+                            ${sale.paymentBreakdown.transfer!.toLocaleString('es-AR')}
+                          </span>
+                        </div>
+                      )}
+                      {(sale.paymentBreakdown.credit || 0) > 0 && (
+                        <div className="p-2 bg-white rounded-xl border border-amber-200/60">
+                          <span className="text-slate-400 font-bold block text-[10px]">📒 Fiado / Cta. Cte.</span>
+                          <span className="font-bold text-purple-800 font-mono">
+                            ${sale.paymentBreakdown.credit!.toLocaleString('es-AR')}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* Customer Information if applicable */}
                 {(sale.customerName || sale.customerId) && (

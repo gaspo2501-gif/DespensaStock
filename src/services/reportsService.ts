@@ -280,16 +280,40 @@ export const reportsService = {
 
     for (const s of currentSales) {
       const method = s.paymentMethod || 'cash';
-      if (!paymentMethodsMap[method]) {
-        paymentMethodsMap[method] = { amount: 0, count: 0 };
-      }
-      paymentMethodsMap[method].amount += s.totalAmount || 0;
-      paymentMethodsMap[method].count += 1;
-
-      if (method === 'credit') {
-        creditSalesAmount += s.totalAmount || 0;
+      if (method === 'mixed' && s.paymentBreakdown) {
+        const bd = s.paymentBreakdown;
+        if ((bd.cash || 0) > 0) {
+          paymentMethodsMap.cash.amount += bd.cash!;
+          paymentMethodsMap.cash.count += 1;
+          collectedAmount += bd.cash!;
+        }
+        if ((bd.mercado_pago || 0) > 0) {
+          paymentMethodsMap.mercado_pago.amount += bd.mercado_pago!;
+          paymentMethodsMap.mercado_pago.count += 1;
+          collectedAmount += bd.mercado_pago!;
+        }
+        if ((bd.transfer || 0) > 0) {
+          paymentMethodsMap.transfer.amount += bd.transfer!;
+          paymentMethodsMap.transfer.count += 1;
+          collectedAmount += bd.transfer!;
+        }
+        if ((bd.credit || 0) > 0) {
+          paymentMethodsMap.credit.amount += bd.credit!;
+          paymentMethodsMap.credit.count += 1;
+          creditSalesAmount += bd.credit!;
+        }
       } else {
-        collectedAmount += s.totalAmount || 0;
+        if (!paymentMethodsMap[method]) {
+          paymentMethodsMap[method] = { amount: 0, count: 0 };
+        }
+        paymentMethodsMap[method].amount += s.totalAmount || 0;
+        paymentMethodsMap[method].count += 1;
+
+        if (method === 'credit') {
+          creditSalesAmount += s.totalAmount || 0;
+        } else {
+          collectedAmount += s.totalAmount || 0;
+        }
       }
     }
 

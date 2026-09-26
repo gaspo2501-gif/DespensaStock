@@ -76,10 +76,13 @@ export const SalesHistoryModal: React.FC<SalesHistoryModalProps> = ({
         return <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Efectivo</span>;
       case 'mercado_pago':
         return <span className="text-[10px] font-bold text-sky-700 bg-sky-50 px-2 py-0.5 rounded-full border border-sky-200">Mercado Pago</span>;
+      case 'credit':
       case 'fiado':
         return <span className="text-[10px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full border border-purple-200">Fiado</span>;
       case 'transfer':
         return <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200">Transferencia</span>;
+      case 'mixed':
+        return <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-300">Combinado</span>;
       default:
         return <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">{method || 'Otro'}</span>;
     }

@@ -184,29 +184,111 @@ export const cashService = {
         : local.filter(m => (m.locationId || 'aimogasta') === locationId);
     }
 
-    // Map to keep track of existing movements by sourceType + sourceId
+    // Map to keep track of movements by unique ID
     const movementMap = new Map<string, CashMovement>();
+    const existingSaleIds = new Set<string>();
+    const existingExpenseIds = new Set<string>();
+    const existingPaymentIds = new Set<string>();
 
-    // Key function for source uniqueness
-    const getSourceKey = (sourceType: string, sourceId: string) => `${sourceType}_${sourceId}`;
-
-    // Add saved movements first
+    // Add saved movements first from cash_movements collection
     for (const mov of manualAndSavedMovements) {
       if (mov.sourceType !== 'MANUAL') {
-        movementMap.set(getSourceKey(mov.sourceType, mov.sourceId), mov);
+        movementMap.set(mov.id, mov);
+        if (mov.sourceType === 'SALE') existingSaleIds.add(mov.sourceId);
+        if (mov.sourceType === 'EXPENSE') existingExpenseIds.add(mov.sourceId);
+        if (mov.sourceType === 'CUSTOMER_PAYMENT') existingPaymentIds.add(mov.sourceId);
       }
     }
 
-    // 2. Consolidate Sales (both cash/MP/transfer AND fiado/credit)
+    // 2. Consolidate Sales (both single method AND mixed/combined payments)
     try {
       const sales = await salesService.getRecentSales(locationId);
       for (const sale of sales) {
-        const key = getSourceKey('SALE', sale.id);
-        if (!movementMap.has(key)) {
-          const saleDateStr = sale.date || toArgentinaDateString(sale.createdAt) || getArgentinaToday();
-          const isFiado = sale.paymentMethod === 'credit';
-          const customerInfo = sale.customerName ? ` (${sale.customerName})` : '';
+        if (existingSaleIds.has(sale.id)) continue;
 
+        const saleDateStr = sale.date || toArgentinaDateString(sale.createdAt) || getArgentinaToday();
+        const customerInfo = sale.customerName ? ` (${sale.customerName})` : '';
+
+        if (sale.paymentMethod === 'mixed' && sale.paymentBreakdown) {
+          const { cash = 0, mercado_pago = 0, transfer = 0, credit = 0 } = sale.paymentBreakdown;
+          if (cash > 0) {
+            const id = `mov_cash_sale_${sale.id}_cash`;
+            movementMap.set(id, {
+              id,
+              type: 'INCOME',
+              amount: cash,
+              paymentMethod: 'cash',
+              description: `Venta #${sale.id.replace('sale_', '')} (Efectivo)${customerInfo}`,
+              date: saleDateStr,
+              sourceType: 'SALE',
+              sourceId: sale.id,
+              locationId: sale.locationId || 'aimogasta',
+              notes: `Pago combinado - Efectivo (${sale.totalItemsCount} ítems)`,
+              createdAt: sale.createdAt || new Date().toISOString(),
+              status: sale.status || undefined,
+              cancelledAt: sale.cancelledAt || undefined,
+              cancellationReason: sale.cancellationReason || undefined,
+            });
+          }
+          if (mercado_pago > 0) {
+            const id = `mov_cash_sale_${sale.id}_mp`;
+            movementMap.set(id, {
+              id,
+              type: 'INCOME',
+              amount: mercado_pago,
+              paymentMethod: 'mercado_pago',
+              description: `Venta #${sale.id.replace('sale_', '')} (Mercado Pago)${customerInfo}`,
+              date: saleDateStr,
+              sourceType: 'SALE',
+              sourceId: sale.id,
+              locationId: sale.locationId || 'aimogasta',
+              notes: `Pago combinado - Mercado Pago (${sale.totalItemsCount} ítems)`,
+              createdAt: sale.createdAt || new Date().toISOString(),
+              status: sale.status || undefined,
+              cancelledAt: sale.cancelledAt || undefined,
+              cancellationReason: sale.cancellationReason || undefined,
+            });
+          }
+          if (transfer > 0) {
+            const id = `mov_cash_sale_${sale.id}_transfer`;
+            movementMap.set(id, {
+              id,
+              type: 'INCOME',
+              amount: transfer,
+              paymentMethod: 'transfer',
+              description: `Venta #${sale.id.replace('sale_', '')} (Transferencia)${customerInfo}`,
+              date: saleDateStr,
+              sourceType: 'SALE',
+              sourceId: sale.id,
+              locationId: sale.locationId || 'aimogasta',
+              notes: `Pago combinado - Transferencia (${sale.totalItemsCount} ítems)`,
+              createdAt: sale.createdAt || new Date().toISOString(),
+              status: sale.status || undefined,
+              cancelledAt: sale.cancelledAt || undefined,
+              cancellationReason: sale.cancellationReason || undefined,
+            });
+          }
+          if (credit > 0) {
+            const id = `mov_cash_sale_${sale.id}_credit`;
+            movementMap.set(id, {
+              id,
+              type: 'INCOME',
+              amount: credit,
+              paymentMethod: 'credit',
+              description: `Venta #${sale.id.replace('sale_', '')} (Fiado)${customerInfo}`,
+              date: saleDateStr,
+              sourceType: 'SALE',
+              sourceId: sale.id,
+              locationId: sale.locationId || 'aimogasta',
+              notes: `Pago combinado - Fiado${customerInfo}`,
+              createdAt: sale.createdAt || new Date().toISOString(),
+              status: sale.status || undefined,
+              cancelledAt: sale.cancelledAt || undefined,
+              cancellationReason: sale.cancellationReason || undefined,
+            });
+          }
+        } else {
+          const isFiado = sale.paymentMethod === 'credit';
           const synthMov: CashMovement = {
             id: `mov_cash_sale_${sale.id}`,
             type: 'INCOME',
@@ -223,7 +305,7 @@ export const cashService = {
             cancelledAt: sale.cancelledAt || undefined,
             cancellationReason: sale.cancellationReason || undefined,
           };
-          movementMap.set(key, synthMov);
+          movementMap.set(synthMov.id, synthMov);
         }
       }
     } catch (err) {
@@ -234,26 +316,24 @@ export const cashService = {
     try {
       const expenses = await expenseService.getExpenses(locationId);
       for (const exp of expenses) {
-        const key = getSourceKey('EXPENSE', exp.id);
-        if (!movementMap.has(key)) {
-          const synthMov: CashMovement = {
-            id: `mov_cash_exp_${exp.id}`,
-            type: 'EXPENSE',
-            amount: exp.amount,
-            paymentMethod: exp.paymentMethod || 'cash',
-            description: `${exp.category}: ${exp.description}`,
-            date: toArgentinaDateString(exp.date || exp.createdAt) || getArgentinaToday(),
-            sourceType: 'EXPENSE',
-            sourceId: exp.id,
-            locationId: exp.locationId || 'aimogasta',
-            notes: exp.notes || '',
-            createdAt: exp.createdAt || new Date().toISOString(),
-            status: exp.status || undefined,
-            cancelledAt: exp.cancelledAt || undefined,
-            cancellationReason: exp.cancellationReason || undefined,
-          };
-          movementMap.set(key, synthMov);
-        }
+        if (existingExpenseIds.has(exp.id)) continue;
+        const synthMov: CashMovement = {
+          id: `mov_cash_exp_${exp.id}`,
+          type: 'EXPENSE',
+          amount: exp.amount,
+          paymentMethod: exp.paymentMethod || 'cash',
+          description: `${exp.category}: ${exp.description}`,
+          date: toArgentinaDateString(exp.date || exp.createdAt) || getArgentinaToday(),
+          sourceType: 'EXPENSE',
+          sourceId: exp.id,
+          locationId: exp.locationId || 'aimogasta',
+          notes: exp.notes || '',
+          createdAt: exp.createdAt || new Date().toISOString(),
+          status: exp.status || undefined,
+          cancelledAt: exp.cancelledAt || undefined,
+          cancellationReason: exp.cancellationReason || undefined,
+        };
+        movementMap.set(synthMov.id, synthMov);
       }
     } catch (err) {
       console.warn('Error al consolidar gastos en caja:', err);
@@ -264,28 +344,26 @@ export const cashService = {
       const accountMovs = await accountService.getAllMovements(locationId);
       for (const accMov of accountMovs) {
         if (accMov.type !== 'PAYMENT') continue;
+        if (existingPaymentIds.has(accMov.id)) continue;
 
-        const key = getSourceKey('CUSTOMER_PAYMENT', accMov.id);
-        if (!movementMap.has(key)) {
-          const payDateStr = toArgentinaDateString(accMov.createdAt) || getArgentinaToday();
-          const synthMov: CashMovement = {
-            id: `mov_cash_pay_${accMov.id}`,
-            type: 'INCOME',
-            amount: accMov.amount,
-            paymentMethod: (accMov as any).paymentMethod || 'cash',
-            description: accMov.description || 'Cobro cliente fiado',
-            date: payDateStr,
-            sourceType: 'CUSTOMER_PAYMENT',
-            sourceId: accMov.id,
-            locationId: accMov.locationId || 'aimogasta',
-            notes: accMov.notes || '',
-            createdAt: accMov.createdAt || new Date().toISOString(),
-            status: accMov.status || undefined,
-            cancelledAt: accMov.cancelledAt || undefined,
-            cancellationReason: accMov.cancellationReason || undefined,
-          };
-          movementMap.set(key, synthMov);
-        }
+        const payDateStr = toArgentinaDateString(accMov.createdAt) || getArgentinaToday();
+        const synthMov: CashMovement = {
+          id: `mov_cash_pay_${accMov.id}`,
+          type: 'INCOME',
+          amount: accMov.amount,
+          paymentMethod: (accMov as any).paymentMethod || 'cash',
+          description: accMov.description || 'Cobro cliente fiado',
+          date: payDateStr,
+          sourceType: 'CUSTOMER_PAYMENT',
+          sourceId: accMov.id,
+          locationId: accMov.locationId || 'aimogasta',
+          notes: accMov.notes || '',
+          createdAt: accMov.createdAt || new Date().toISOString(),
+          status: accMov.status || undefined,
+          cancelledAt: accMov.cancelledAt || undefined,
+          cancellationReason: accMov.cancellationReason || undefined,
+        };
+        movementMap.set(synthMov.id, synthMov);
       }
     } catch (err) {
       console.warn('Error al consolidar pagos de clientes en caja:', err);
@@ -338,6 +416,11 @@ export const cashService = {
     let transferBalance = 0;
     let otherBalance = 0;
 
+    let todayCash = 0;
+    let todayMercadoPago = 0;
+    let todayTransfer = 0;
+    let todayOther = 0;
+
     let todayIncome = 0;
     let todayExpense = 0;
 
@@ -352,7 +435,7 @@ export const cashService = {
       const isIncome = mov.type === 'INCOME';
       const val = isIncome ? mov.amount : -mov.amount;
 
-      // Accumulate totals by payment method
+      // Accumulate totals by payment method (historical accumulated balances)
       if (mov.paymentMethod === 'cash') {
         cashBalance += val;
       } else if (mov.paymentMethod === 'mercado_pago') {
@@ -363,12 +446,22 @@ export const cashService = {
         otherBalance += val;
       }
 
-      // Today's summary (strictly cash flow: dinero efectivamente ingresado)
+      // Today's summary (strictly cash flow: dinero efectivamente ingresado / egresado)
       if (mov.date === todayStr) {
         if (isIncome) {
           todayIncome += mov.amount;
         } else {
           todayExpense += mov.amount;
+        }
+
+        if (mov.paymentMethod === 'cash') {
+          todayCash += val;
+        } else if (mov.paymentMethod === 'mercado_pago') {
+          todayMercadoPago += val;
+        } else if (mov.paymentMethod === 'transfer') {
+          todayTransfer += val;
+        } else {
+          todayOther += val;
         }
       }
     }
@@ -398,6 +491,10 @@ export const cashService = {
       todayExpense,
       todayNet: todayIncome - todayExpense,
       todaySales,
+      todayCash,
+      todayMercadoPago,
+      todayTransfer,
+      todayOther,
     };
   },
 

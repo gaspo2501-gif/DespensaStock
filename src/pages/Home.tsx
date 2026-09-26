@@ -390,9 +390,13 @@ export const Home: React.FC<HomeProps> = ({
                         <span
                           className={`text-[10px] font-bold px-2 py-0.5 rounded-md uppercase ${
                             sale.paymentMethod === 'credit'
-                              ? 'bg-amber-100 text-amber-800'
+                              ? 'bg-purple-100 text-purple-800'
                               : sale.paymentMethod === 'mercado_pago'
                               ? 'bg-sky-100 text-sky-800'
+                              : sale.paymentMethod === 'transfer'
+                              ? 'bg-indigo-100 text-indigo-800'
+                              : sale.paymentMethod === 'mixed'
+                              ? 'bg-amber-100 text-amber-800'
                               : 'bg-emerald-100 text-emerald-800'
                           }`}
                         >
@@ -400,6 +404,10 @@ export const Home: React.FC<HomeProps> = ({
                             ? `Fiado (${sale.customerName || 'Cliente'})`
                             : sale.paymentMethod === 'mercado_pago'
                             ? 'MP'
+                            : sale.paymentMethod === 'transfer'
+                            ? 'Transf'
+                            : sale.paymentMethod === 'mixed'
+                            ? 'Combinado'
                             : 'Efectivo'}
                         </span>
                       </div>

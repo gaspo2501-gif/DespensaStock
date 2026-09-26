@@ -47,4 +47,8 @@ export interface CashBalanceSummary {
   todayExpense: number;
   todayNet: number;
   todaySales: number; // Total commercial activity today (cash, MP, transfer, credit/fiado)
+  todayCash: number;
+  todayMercadoPago: number;
+  todayTransfer: number;
+  todayOther?: number;
 }

@@ -47,6 +47,7 @@ import {
   ArrowUpRight, 
   ArrowDownRight,
   ChevronRight,
+  ChevronDown,
   PieChart,
   ExternalLink,
   ArrowLeftRight,
@@ -72,7 +73,13 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
     todayExpense: 0,
     todayNet: 0,
     todaySales: 0,
+    todayCash: 0,
+    todayMercadoPago: 0,
+    todayTransfer: 0,
+    todayOther: 0,
   });
+
+  const [showHistoricalBalances, setShowHistoricalBalances] = useState<boolean>(false);
 
   const [movements, setMovements] = useState<CashMovement[]>([]);
   const [closures, setClosures] = useState<CashClosure[]>([]);
@@ -543,71 +550,113 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
       {activeSubTab === 'movements' && (
         <div className="space-y-6 animate-fadeIn">
 
-      {/* Main Balances Grid */}
+      {/* Main Balances Grid (Balance del Día) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-        {/* Efectivo */}
+        {/* Efectivo Hoy */}
         <div className="p-4 bg-white border border-slate-200 rounded-3xl shadow-2xs space-y-2 relative overflow-hidden group hover:border-emerald-300 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500">Saldo en Efectivo</span>
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500">Efectivo Hoy</span>
             <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
               <DollarSign className="w-4 h-4" />
             </div>
           </div>
           <div>
             <p className="text-2xl font-black font-mono text-emerald-700">
-              ${summary.cashBalance.toLocaleString('es-AR')}
+              {summary.todayCash >= 0 ? '+' : ''}${summary.todayCash.toLocaleString('es-AR')}
             </p>
-            <p className="text-[11px] text-slate-400 mt-0.5">Caja física esperada</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">Dinero neto en efectivo del día</p>
           </div>
         </div>
 
-        {/* Mercado Pago */}
+        {/* Mercado Pago Hoy */}
         <div className="p-4 bg-white border border-slate-200 rounded-3xl shadow-2xs space-y-2 relative overflow-hidden group hover:border-sky-300 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500">Mercado Pago</span>
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500">Mercado Pago Hoy</span>
             <div className="w-8 h-8 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center font-bold">
               <Smartphone className="w-4 h-4" />
             </div>
           </div>
           <div>
             <p className="text-2xl font-black font-mono text-sky-700">
-              ${summary.mercadoPagoBalance.toLocaleString('es-AR')}
+              {summary.todayMercadoPago >= 0 ? '+' : ''}${summary.todayMercadoPago.toLocaleString('es-AR')}
             </p>
-            <p className="text-[11px] text-slate-400 mt-0.5">Cuenta MP consolidada</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">Dinero neto digital MP del día</p>
           </div>
         </div>
 
-        {/* Transferencias */}
+        {/* Transferencias Hoy */}
         <div className="p-4 bg-white border border-slate-200 rounded-3xl shadow-2xs space-y-2 relative overflow-hidden group hover:border-indigo-300 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500">Transferencias</span>
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500">Transferencias Hoy</span>
             <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
               <Building2 className="w-4 h-4" />
             </div>
           </div>
           <div>
             <p className="text-2xl font-black font-mono text-indigo-700">
-              ${summary.transferBalance.toLocaleString('es-AR')}
+              {summary.todayTransfer >= 0 ? '+' : ''}${summary.todayTransfer.toLocaleString('es-AR')}
             </p>
-            <p className="text-[11px] text-slate-400 mt-0.5">Banco / Cuentas digitales</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">Dinero neto transferencias del día</p>
           </div>
         </div>
 
-        {/* Saldo Total */}
+        {/* Balance del Día */}
         <div className="p-4 bg-slate-900 text-white rounded-3xl shadow-md space-y-2 relative overflow-hidden">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Saldo Total</span>
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Balance del Día</span>
             <div className="w-8 h-8 rounded-xl bg-white/10 text-emerald-400 flex items-center justify-center font-bold">
               <PieChart className="w-4 h-4" />
             </div>
           </div>
           <div>
             <p className="text-2xl font-black font-mono text-white">
-              ${summary.totalBalance.toLocaleString('es-AR')}
+              {summary.todayNet >= 0 ? '+' : ''}${summary.todayNet.toLocaleString('es-AR')}
             </p>
-            <p className="text-[11px] text-slate-400 mt-0.5">Suma de todos los medios</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">Movimiento financiero neto del día</p>
           </div>
         </div>
+      </div>
+
+      {/* Panel discreto de consulta: Saldos Acumulados Históricos (para Arqueo de Caja) */}
+      <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 space-y-2">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={() => setShowHistoricalBalances(!showHistoricalBalances)}
+            className="text-xs font-bold text-slate-600 hover:text-slate-900 flex items-center gap-1.5 transition-colors self-start"
+          >
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${showHistoricalBalances ? 'rotate-180' : ''}`} />
+            <span>{showHistoricalBalances ? 'Ocultar saldos acumulados de caja' : 'Ver saldos acumulados de caja (para arqueos y cierres)'}</span>
+          </button>
+          <div className="text-[11px] font-mono text-slate-500 font-medium">
+            Saldo acumulado total: <strong className="text-slate-800">${summary.totalBalance.toLocaleString('es-AR')}</strong>
+          </div>
+        </div>
+
+        {showHistoricalBalances && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-2.5 border-t border-slate-200/70 animate-fadeIn text-xs">
+            <div className="p-3 bg-white border border-slate-200 rounded-xl space-y-0.5">
+              <span className="text-[10px] uppercase font-bold text-slate-400 block">Efectivo Acumulado</span>
+              <span className="text-sm font-black font-mono text-emerald-700">${summary.cashBalance.toLocaleString('es-AR')}</span>
+              <p className="text-[10px] text-slate-400">Caja física esperada</p>
+            </div>
+            <div className="p-3 bg-white border border-slate-200 rounded-xl space-y-0.5">
+              <span className="text-[10px] uppercase font-bold text-slate-400 block">Mercado Pago Acumulado</span>
+              <span className="text-sm font-black font-mono text-sky-700">${summary.mercadoPagoBalance.toLocaleString('es-AR')}</span>
+              <p className="text-[10px] text-slate-400">Cuenta digital MP</p>
+            </div>
+            <div className="p-3 bg-white border border-slate-200 rounded-xl space-y-0.5">
+              <span className="text-[10px] uppercase font-bold text-slate-400 block">Transferencias Acumuladas</span>
+              <span className="text-sm font-black font-mono text-indigo-700">${summary.transferBalance.toLocaleString('es-AR')}</span>
+              <p className="text-[10px] text-slate-400">Banco / Cuentas digitales</p>
+            </div>
+            <div className="p-3 bg-white border border-slate-200 rounded-xl space-y-0.5">
+              <span className="text-[10px] uppercase font-bold text-slate-400 block">Saldo Total Acumulado</span>
+              <span className="text-sm font-black font-mono text-slate-900">${summary.totalBalance.toLocaleString('es-AR')}</span>
+              <p className="text-[10px] text-slate-400">Todos los medios</p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Today's Summary Card */}

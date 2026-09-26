@@ -18,7 +18,14 @@ export interface SaleItemRecord {
   subtotal: number;
 }
 
-export type PaymentMethod = 'cash' | 'mercado_pago' | 'credit';
+export type PaymentMethod = 'cash' | 'mercado_pago' | 'transfer' | 'credit' | 'mixed';
+
+export interface PaymentBreakdown {
+  cash?: number;
+  mercado_pago?: number;
+  transfer?: number;
+  credit?: number;
+}
 
 export interface SaleRecord {
   id: string;
@@ -28,6 +35,7 @@ export interface SaleRecord {
   totalAmount: number;
   totalItemsCount: number;
   paymentMethod?: PaymentMethod;
+  paymentBreakdown?: PaymentBreakdown;
   customerId?: string;
   customerName?: string;
   locationId?: string;

@@ -35,6 +35,8 @@ import {
   UserPlus,
   QrCode,
   Banknote,
+  Building2,
+  ArrowLeftRight,
   MapPin,
   History,
   Receipt
@@ -66,6 +68,12 @@ export const SalesPage: React.FC<SalesPageProps> = ({
   const [showCreateCustomerModal, setShowCreateCustomerModal] = useState(false);
   const [loadingCustomers, setLoadingCustomers] = useState(false);
 
+  // Combined Payment Breakdown State
+  const [splitCashStr, setSplitCashStr] = useState<string>('');
+  const [splitMpStr, setSplitMpStr] = useState<string>('');
+  const [splitTransferStr, setSplitTransferStr] = useState<string>('');
+  const [splitCreditStr, setSplitCreditStr] = useState<string>('');
+
   // Status & Feedback banners
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'warning'; message: string } | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -94,7 +102,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
   }, [activeLocation]);
 
   useEffect(() => {
-    if (paymentMethod === 'credit') {
+    if (paymentMethod === 'credit' || paymentMethod === 'mixed') {
       loadCustomersData();
     }
   }, [paymentMethod, loadCustomersData]);
@@ -266,12 +274,26 @@ export const SalesPage: React.FC<SalesPageProps> = ({
     setCart([]);
     setSelectedCustomer(null);
     setPaymentMethod('cash');
+    setSplitCashStr('');
+    setSplitMpStr('');
+    setSplitTransferStr('');
+    setSplitCreditStr('');
     setFeedback(null);
   };
 
   // Totals calculations
   const totalAmount = cart.reduce((acc, curr) => acc + curr.subtotal, 0);
   const totalItemsCount = cart.reduce((acc, curr) => acc + curr.quantity, 0);
+
+  // Split payment math
+  const splitCash = Math.max(0, parseFloat(splitCashStr) || 0);
+  const splitMp = Math.max(0, parseFloat(splitMpStr) || 0);
+  const splitTransfer = Math.max(0, parseFloat(splitTransferStr) || 0);
+  const splitCredit = Math.max(0, parseFloat(splitCreditStr) || 0);
+
+  const splitAssigned = Math.round((splitCash + splitMp + splitTransfer + splitCredit) * 100) / 100;
+  const splitRemaining = Math.round((totalAmount - splitAssigned) * 100) / 100;
+  const isSplitExact = Math.abs(splitRemaining) < 0.01;
 
   // Confirm Sale Execution with activeLocation
   const handleConfirmSale = async () => {
@@ -288,6 +310,28 @@ export const SalesPage: React.FC<SalesPageProps> = ({
       return;
     }
 
+    // Mixed payment validation
+    if (paymentMethod === 'mixed') {
+      if (!isSplitExact) {
+        playScanSound('error');
+        setFeedback({
+          type: 'warning',
+          message: splitRemaining > 0
+            ? `Faltan asignar $${splitRemaining.toLocaleString('es-AR')} del total de la venta.`
+            : `El monto asignado supera el total por $${Math.abs(splitRemaining).toLocaleString('es-AR')}.`
+        });
+        return;
+      }
+      if (splitCredit > 0 && !selectedCustomer) {
+        playScanSound('error');
+        setFeedback({
+          type: 'warning',
+          message: 'Seleccioná o creá un cliente para el importe en fiado.',
+        });
+        return;
+      }
+    }
+
     setIsProcessing(true);
 
     try {
@@ -296,7 +340,13 @@ export const SalesPage: React.FC<SalesPageProps> = ({
         paymentMethod,
         selectedCustomer?.id,
         selectedCustomer?.name,
-        activeLocation
+        activeLocation,
+        paymentMethod === 'mixed' ? {
+          cash: splitCash,
+          mercado_pago: splitMp,
+          transfer: splitTransfer,
+          credit: splitCredit,
+        } : undefined
       );
       onProductsUpdated(result.updatedProducts);
       setCompletedSale(result.sale);
@@ -304,6 +354,10 @@ export const SalesPage: React.FC<SalesPageProps> = ({
       setCart([]);
       setSelectedCustomer(null);
       setPaymentMethod('cash');
+      setSplitCashStr('');
+      setSplitMpStr('');
+      setSplitTransferStr('');
+      setSplitCreditStr('');
     } catch (err: unknown) {
       playScanSound('error');
       setFeedback({
@@ -397,9 +451,43 @@ export const SalesPage: React.FC<SalesPageProps> = ({
                   ? `Fiado (${completedSale.customerName || 'Cliente'})`
                   : completedSale.paymentMethod === 'mercado_pago'
                   ? 'Mercado Pago'
+                  : completedSale.paymentMethod === 'transfer'
+                  ? 'Transferencia'
+                  : completedSale.paymentMethod === 'mixed'
+                  ? 'Pago Combinado'
                   : 'Efectivo'}
               </span>
             </div>
+
+            {completedSale.paymentMethod === 'mixed' && completedSale.paymentBreakdown && (
+              <div className="p-2.5 bg-amber-50/70 border border-amber-200/80 rounded-xl space-y-1 text-xs font-sans">
+                <span className="text-[10px] uppercase font-bold text-amber-900 block">Desglose del Pago:</span>
+                {(completedSale.paymentBreakdown.cash || 0) > 0 && (
+                  <div className="flex justify-between text-slate-700">
+                    <span>💵 Efectivo:</span>
+                    <strong className="font-mono">${completedSale.paymentBreakdown.cash!.toLocaleString('es-AR')}</strong>
+                  </div>
+                )}
+                {(completedSale.paymentBreakdown.mercado_pago || 0) > 0 && (
+                  <div className="flex justify-between text-slate-700">
+                    <span>📱 Mercado Pago:</span>
+                    <strong className="font-mono">${completedSale.paymentBreakdown.mercado_pago!.toLocaleString('es-AR')}</strong>
+                  </div>
+                )}
+                {(completedSale.paymentBreakdown.transfer || 0) > 0 && (
+                  <div className="flex justify-between text-slate-700">
+                    <span>🏦 Transferencia:</span>
+                    <strong className="font-mono">${completedSale.paymentBreakdown.transfer!.toLocaleString('es-AR')}</strong>
+                  </div>
+                )}
+                {(completedSale.paymentBreakdown.credit || 0) > 0 && (
+                  <div className="flex justify-between text-slate-700">
+                    <span>📒 Fiado ({completedSale.customerName || 'Cliente'}):</span>
+                    <strong className="font-mono text-purple-700">${completedSale.paymentBreakdown.credit!.toLocaleString('es-AR')}</strong>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="space-y-1 text-xs">
               {completedSale.items.map((item, i) => (
@@ -629,8 +717,16 @@ export const SalesPage: React.FC<SalesPageProps> = ({
 
               {/* FORMA DE PAGO SECTION */}
               <div className="p-4 bg-white border border-slate-200 rounded-3xl space-y-3 shadow-2xs">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">Forma de Pago</h3>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">Forma de Pago</h3>
+                  {paymentMethod === 'mixed' && (
+                    <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                      Múltiples Medios
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                   <button
                     type="button"
                     onClick={() => {
@@ -665,19 +761,366 @@ export const SalesPage: React.FC<SalesPageProps> = ({
 
                   <button
                     type="button"
+                    onClick={() => {
+                      setPaymentMethod('transfer');
+                      setSelectedCustomer(null);
+                    }}
+                    className={`py-3 px-2 rounded-2xl font-bold text-xs transition-all flex flex-col items-center justify-center gap-1 border ${
+                      paymentMethod === 'transfer'
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <Building2 className="w-4 h-4" />
+                    <span>Transferencia</span>
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={() => setPaymentMethod('credit')}
                     className={`py-3 px-2 rounded-2xl font-bold text-xs transition-all flex flex-col items-center justify-center gap-1 border ${
                       paymentMethod === 'credit'
-                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                        ? 'bg-purple-600 text-white border-purple-600 shadow-sm'
                         : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                     }`}
                   >
                     <Users className="w-4 h-4" />
                     <span>Fiado (Cuenta)</span>
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethod('mixed')}
+                    className={`col-span-2 sm:col-span-1 py-3 px-2 rounded-2xl font-bold text-xs transition-all flex flex-col items-center justify-center gap-1 border ${
+                      paymentMethod === 'mixed'
+                        ? 'bg-amber-600 text-white border-amber-600 shadow-sm ring-2 ring-amber-400/40'
+                        : 'bg-amber-50/70 text-amber-900 border-amber-300 hover:bg-amber-100'
+                    }`}
+                  >
+                    <ArrowLeftRight className="w-4 h-4" />
+                    <span>Pago Combinado</span>
+                  </button>
                 </div>
 
-                {/* FIADO CUSTOMER SELECTOR */}
+                {/* INTERFAZ DE PAGO COMBINADO */}
+                {paymentMethod === 'mixed' && (
+                  <div className="pt-3 border-t border-slate-100 space-y-3.5 animate-fadeIn">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 pb-2 border-b border-slate-100">
+                      <div>
+                        <span className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                          <ArrowLeftRight className="w-4 h-4 text-amber-600" />
+                          <span>Distribución del Total</span>
+                        </span>
+                        <p className="text-[11px] text-slate-500">Ingresá los importes cobrados por cada medio.</p>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Total de la venta</span>
+                        <span className="text-base font-black font-mono text-slate-900">${totalAmount.toLocaleString('es-AR')}</span>
+                      </div>
+                    </div>
+
+                    {/* Inputs de medios combinados */}
+                    <div className="space-y-2">
+                      {/* Efectivo */}
+                      <div className="p-2.5 sm:p-3 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
+                            <Banknote className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <span className="text-xs font-bold text-slate-800">Efectivo</span>
+                            <span className="text-[10px] text-slate-400 block">Dinero en caja</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <div className="relative w-full sm:w-36">
+                            <span className="absolute left-3 top-2.5 text-xs font-bold text-slate-400">$</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="any"
+                              placeholder="0"
+                              value={splitCashStr}
+                              onChange={(e) => setSplitCashStr(e.target.value)}
+                              className="w-full pl-7 pr-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-900 outline-none focus:ring-2 focus:ring-emerald-500"
+                            />
+                          </div>
+                          {splitRemaining > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const nextVal = Math.round((splitCash + splitRemaining) * 100) / 100;
+                                setSplitCashStr(nextVal.toString());
+                              }}
+                              className="px-2 py-2 text-[10px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl whitespace-nowrap transition-colors"
+                              title="Asignar el saldo restante aquí"
+                            >
+                              Restante
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Mercado Pago */}
+                      <div className="p-2.5 sm:p-3 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center font-bold">
+                            <QrCode className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <span className="text-xs font-bold text-slate-800">Mercado Pago</span>
+                            <span className="text-[10px] text-slate-400 block">Cobro digital MP</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <div className="relative w-full sm:w-36">
+                            <span className="absolute left-3 top-2.5 text-xs font-bold text-slate-400">$</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="any"
+                              placeholder="0"
+                              value={splitMpStr}
+                              onChange={(e) => setSplitMpStr(e.target.value)}
+                              className="w-full pl-7 pr-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-900 outline-none focus:ring-2 focus:ring-sky-500"
+                            />
+                          </div>
+                          {splitRemaining > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const nextVal = Math.round((splitMp + splitRemaining) * 100) / 100;
+                                setSplitMpStr(nextVal.toString());
+                              }}
+                              className="px-2 py-2 text-[10px] font-bold text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-xl whitespace-nowrap transition-colors"
+                              title="Asignar el saldo restante aquí"
+                            >
+                              Restante
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Transferencia */}
+                      <div className="p-2.5 sm:p-3 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold">
+                            <Building2 className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <span className="text-xs font-bold text-slate-800">Transferencia</span>
+                            <span className="text-[10px] text-slate-400 block">Banco / Cuenta digital</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <div className="relative w-full sm:w-36">
+                            <span className="absolute left-3 top-2.5 text-xs font-bold text-slate-400">$</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="any"
+                              placeholder="0"
+                              value={splitTransferStr}
+                              onChange={(e) => setSplitTransferStr(e.target.value)}
+                              className="w-full pl-7 pr-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                          </div>
+                          {splitRemaining > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const nextVal = Math.round((splitTransfer + splitRemaining) * 100) / 100;
+                                setSplitTransferStr(nextVal.toString());
+                              }}
+                              className="px-2 py-2 text-[10px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl whitespace-nowrap transition-colors"
+                              title="Asignar el saldo restante aquí"
+                            >
+                              Restante
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Fiado / Cuenta Corriente */}
+                      <div className="p-2.5 sm:p-3 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center font-bold">
+                            <Users className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <span className="text-xs font-bold text-slate-800">Fiado (Cuenta Corriente)</span>
+                            <span className="text-[10px] text-slate-400 block">Anotar en cuenta de cliente</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <div className="relative w-full sm:w-36">
+                            <span className="absolute left-3 top-2.5 text-xs font-bold text-slate-400">$</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="any"
+                              placeholder="0"
+                              value={splitCreditStr}
+                              onChange={(e) => setSplitCreditStr(e.target.value)}
+                              className="w-full pl-7 pr-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-900 outline-none focus:ring-2 focus:ring-purple-500"
+                            />
+                          </div>
+                          {splitRemaining > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const nextVal = Math.round((splitCredit + splitRemaining) * 100) / 100;
+                                setSplitCreditStr(nextVal.toString());
+                              }}
+                              className="px-2 py-2 text-[10px] font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-xl whitespace-nowrap transition-colors"
+                              title="Asignar el saldo restante aquí"
+                            >
+                              Restante
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Resumen de Asignación y Alerta de Validación Obligatoria */}
+                    <div className="p-3.5 rounded-2xl border text-xs space-y-2 bg-slate-50 border-slate-200">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-600 font-bold">TOTAL ASIGNADO:</span>
+                        <span className="font-mono font-black text-slate-900">${splitAssigned.toLocaleString('es-AR')}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-600 font-bold">RESTANTE:</span>
+                        <span className={`font-mono font-black ${isSplitExact ? 'text-emerald-700' : splitRemaining > 0 ? 'text-amber-700' : 'text-rose-700'}`}>
+                          ${splitRemaining.toLocaleString('es-AR')}
+                        </span>
+                      </div>
+
+                      {splitRemaining > 0.009 && (
+                        <div className="p-2.5 bg-amber-100/80 border border-amber-300 rounded-xl text-amber-950 font-bold flex items-center gap-2">
+                          <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
+                          <span>Faltan asignar ${splitRemaining.toLocaleString('es-AR')}</span>
+                        </div>
+                      )}
+
+                      {splitRemaining < -0.009 && (
+                        <div className="p-2.5 bg-rose-100/80 border border-rose-300 rounded-xl text-rose-950 font-bold flex items-center gap-2">
+                          <AlertCircle className="w-4 h-4 text-rose-700 shrink-0" />
+                          <span>El monto asignado supera el total por ${Math.abs(splitRemaining).toLocaleString('es-AR')}</span>
+                        </div>
+                      )}
+
+                      {isSplitExact && splitAssigned > 0 && (
+                        <div className="p-2.5 bg-emerald-100/80 border border-emerald-300 rounded-xl text-emerald-950 font-bold flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+                          <span>Monto total asignado exactamente. Venta lista para confirmar.</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Selección de Cliente para la parte en Fiado */}
+                    {splitCredit > 0 && (
+                      <div className="p-3.5 bg-purple-50/70 border border-purple-200 rounded-2xl space-y-3">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-bold text-purple-950 uppercase tracking-wider flex items-center gap-1.5">
+                            <Users className="w-4 h-4 text-purple-600" />
+                            <span>Cliente para Parte Fiada (${splitCredit.toLocaleString('es-AR')})</span>
+                          </label>
+
+                          <button
+                            type="button"
+                            onClick={() => setShowCreateCustomerModal(true)}
+                            className="px-2.5 py-1 text-xs font-bold text-purple-700 bg-white hover:bg-purple-100 rounded-xl border border-purple-200 transition-colors flex items-center gap-1"
+                          >
+                            <UserPlus className="w-3.5 h-3.5" />
+                            <span>+ Crear nuevo</span>
+                          </button>
+                        </div>
+
+                        {selectedCustomer ? (
+                          <div className="p-3 bg-white border border-purple-200 rounded-xl flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-7 h-7 rounded-lg bg-purple-600 text-white flex items-center justify-center font-bold">
+                                <UserCheck className="w-3.5 h-3.5" />
+                              </div>
+                              <div>
+                                <p className="text-xs font-bold text-purple-950">{selectedCustomer.name}</p>
+                                <p className="text-[11px] text-purple-700 font-mono">
+                                  Saldo actual: ${(customerBalances[selectedCustomer.id] || 0).toLocaleString('es-AR')}
+                                </p>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedCustomer(null)}
+                              className="px-2.5 py-1 text-[11px] font-bold text-slate-600 hover:text-slate-900 bg-slate-50 border border-slate-300 rounded-xl"
+                            >
+                              Cambiar
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            <div className="relative">
+                              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                              <input
+                                type="text"
+                                placeholder="Buscar cliente por nombre o teléfono..."
+                                value={customerSearchTerm}
+                                onChange={(e) => setCustomerSearchTerm(e.target.value)}
+                                className="w-full pl-9 pr-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:ring-2 focus:ring-purple-500 outline-none"
+                              />
+                            </div>
+
+                            {loadingCustomers ? (
+                              <div className="p-2 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-600" />
+                                <span>Cargando clientes...</span>
+                              </div>
+                            ) : customerSearchResults.length === 0 ? (
+                              <div className="p-3 bg-white rounded-xl text-center space-y-1.5 border border-purple-100">
+                                <p className="text-xs text-slate-500">No se encontraron clientes.</p>
+                                <button
+                                  type="button"
+                                  onClick={() => setShowCreateCustomerModal(true)}
+                                  className="px-2.5 py-1 bg-purple-600 text-white text-xs font-bold rounded-lg shadow-xs"
+                                >
+                                  + Crear cliente '{customerSearchTerm}'
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="max-h-36 overflow-y-auto space-y-1 pr-1">
+                                {customerSearchResults.map((cust) => {
+                                  const bal = customerBalances[cust.id] || 0;
+                                  return (
+                                    <button
+                                      key={cust.id}
+                                      type="button"
+                                      onClick={() => setSelectedCustomer(cust)}
+                                      className="w-full p-2 bg-white hover:bg-purple-100/70 border border-slate-200 rounded-xl text-left flex items-center justify-between text-xs transition-colors"
+                                    >
+                                      <div>
+                                        <p className="font-bold text-slate-900">{cust.name}</p>
+                                        {cust.phone && <p className="text-[10px] text-slate-400">{cust.phone}</p>}
+                                      </div>
+                                      <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${bal > 0 ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                                        {bal > 0 ? `Deuda: $${bal.toLocaleString('es-AR')}` : 'Sin deuda'}
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* FIADO CUSTOMER SELECTOR (Venta puramente fiada) */}
                 {paymentMethod === 'credit' && (
                   <div className="pt-3 border-t border-slate-100 space-y-3 animate-fadeIn">
                     <div className="flex items-center justify-between">
@@ -801,7 +1244,12 @@ export const SalesPage: React.FC<SalesPageProps> = ({
 
                 <button
                   onClick={handleConfirmSale}
-                  disabled={isProcessing || cart.length === 0}
+                  disabled={
+                    isProcessing || 
+                    cart.length === 0 || 
+                    (paymentMethod === 'mixed' && (!isSplitExact || (splitCredit > 0 && !selectedCustomer))) ||
+                    (paymentMethod === 'credit' && !selectedCustomer)
+                  }
                   className="w-full py-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-black text-sm rounded-2xl shadow-md active:scale-98 transition-all flex items-center justify-center gap-2"
                 >
                   {isProcessing ? (
@@ -815,6 +1263,14 @@ export const SalesPage: React.FC<SalesPageProps> = ({
                       <span>
                         {paymentMethod === 'credit'
                           ? `CONFIRMAR VENTA FIADA (${selectedCustomer?.name || 'Seleccionar cliente'})`
+                          : paymentMethod === 'mixed'
+                          ? !isSplitExact
+                            ? splitRemaining > 0 
+                              ? `FALTAN ASIGNAR $${splitRemaining.toLocaleString('es-AR')}`
+                              : `MONTO SUPERA EL TOTAL POR $${Math.abs(splitRemaining).toLocaleString('es-AR')}`
+                            : splitCredit > 0 && !selectedCustomer
+                            ? 'SELECCIONÁ UN CLIENTE PARA EL FIADO'
+                            : `CONFIRMAR VENTA COMBINADA ($${totalAmount.toLocaleString('es-AR')})`
                           : `CONFIRMAR VENTA ($${totalAmount.toLocaleString('es-AR')})`}
                       </span>
                     </>

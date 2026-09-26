@@ -10,7 +10,7 @@ import {
   orderBy 
 } from 'firebase/firestore';
 import { db } from './config';
-import { CartItem, SaleRecord, SaleItemRecord, PaymentMethod } from '../../types/sale';
+import { CartItem, SaleRecord, SaleItemRecord, PaymentMethod, PaymentBreakdown } from '../../types/sale';
 import { Product, getProductStock } from '../../types/product';
 import { LocationSelection, getLocationName } from '../../types/location';
 import { productService } from './productService';
@@ -52,14 +52,15 @@ export const salesService = {
     paymentMethod: PaymentMethod = 'cash', 
     customerId?: string, 
     customerName?: string,
-    locationId: string = 'aimogasta'
+    locationId: string = 'aimogasta',
+    paymentBreakdown?: PaymentBreakdown
   ): Promise<{ sale: SaleRecord; updatedProducts: Product[] }> {
     if (!cartItems || cartItems.length === 0) {
       throw new Error('El carrito de ventas está vacío.');
     }
 
     if (paymentMethod === 'credit' && !customerId) {
-      throw new Error('Seleccioná o creá un cliente para continuar.');
+      throw new Error('Seleccioná o creá un cliente para continuar con la venta fiada.');
     }
 
     const targetLocationKey = locationId === 'olascoaga' ? 'olascoaga' : 'aimogasta';
@@ -91,6 +92,34 @@ export const salesService = {
 
     const totalAmount = saleItemsRecords.reduce((acc, curr) => acc + curr.subtotal, 0);
     const totalItemsCount = saleItemsRecords.reduce((acc, curr) => acc + curr.quantity, 0);
+
+    // Validate payment breakdown if mixed/combinado
+    let validBreakdown: PaymentBreakdown | undefined = undefined;
+    if (paymentMethod === 'mixed') {
+      const bCash = Math.max(0, paymentBreakdown?.cash || 0);
+      const bMp = Math.max(0, paymentBreakdown?.mercado_pago || 0);
+      const bTransfer = Math.max(0, paymentBreakdown?.transfer || 0);
+      const bCredit = Math.max(0, paymentBreakdown?.credit || 0);
+      const assignedTotal = bCash + bMp + bTransfer + bCredit;
+
+      if (Math.abs(assignedTotal - totalAmount) > 0.01) {
+        throw new Error(
+          `La suma de los medios de pago ($${assignedTotal.toLocaleString('es-AR')}) debe ser exactamente igual al total de la venta ($${totalAmount.toLocaleString('es-AR')}).`
+        );
+      }
+
+      if (bCredit > 0 && !customerId) {
+        throw new Error('Seleccioná o creá un cliente para el importe fiado de la venta combinada.');
+      }
+
+      validBreakdown = {
+        cash: bCash,
+        mercado_pago: bMp,
+        transfer: bTransfer,
+        credit: bCredit,
+      };
+    }
+
     const operatingDate = getArgentinaToday();
     const nowIso = new Date().toISOString();
     const saleId = `sale_${Date.now()}`;
@@ -103,6 +132,7 @@ export const salesService = {
       totalAmount,
       totalItemsCount,
       paymentMethod,
+      paymentBreakdown: validBreakdown,
       customerId: customerId || undefined,
       customerName: customerName || undefined,
       locationId: targetLocationKey,
@@ -184,12 +214,13 @@ export const salesService = {
           paymentMethod,
           locationId: targetLocationKey,
         };
+        if (validBreakdown) salePayload.paymentBreakdown = validBreakdown;
         if (customerId) salePayload.customerId = customerId;
         if (customerName) salePayload.customerName = customerName;
 
         transaction.set(saleRef, salePayload);
 
-        // Step D: Write DEBT movement in account_movements if paymentMethod === 'credit'
+        // Step D: Write DEBT movement in account_movements if paymentMethod === 'credit' or mixed with credit > 0
         if (paymentMethod === 'credit' && customerId) {
           const movId = `mov_debt_${Date.now()}`;
           const movRef = doc(db, MOVEMENTS_COLLECTION, movId);
@@ -199,6 +230,20 @@ export const salesService = {
             type: 'DEBT',
             amount: totalAmount,
             description: 'Venta fiada',
+            saleId,
+            locationId: targetLocationKey,
+            createdAtIso: nowIso,
+            createdAt: serverTimestamp(),
+          });
+        } else if (paymentMethod === 'mixed' && validBreakdown && (validBreakdown.credit || 0) > 0 && customerId) {
+          const movId = `mov_debt_${Date.now()}`;
+          const movRef = doc(db, MOVEMENTS_COLLECTION, movId);
+          transaction.set(movRef, {
+            id: movId,
+            customerId,
+            type: 'DEBT',
+            amount: validBreakdown.credit,
+            description: 'Venta fiada (pago combinado)',
             saleId,
             locationId: targetLocationKey,
             createdAtIso: nowIso,
@@ -225,13 +270,52 @@ export const salesService = {
 
       if (paymentMethod === 'credit' && customerId) {
         await accountService.registerDebt(customerId, totalAmount, 'Venta fiada', saleId, targetLocationKey);
+      } else if (paymentMethod === 'mixed' && validBreakdown && (validBreakdown.credit || 0) > 0 && customerId) {
+        await accountService.registerDebt(customerId, validBreakdown.credit!, 'Venta fiada (pago combinado)', saleId, targetLocationKey);
       }
     }
 
-    // Auto-register cash movement for cash/mercado_pago/transfer sales
-    if (paymentMethod !== 'credit') {
-      try {
-        const pm = paymentMethod === 'mercado_pago' ? 'mercado_pago' : 'cash';
+    // Auto-register cash movements for financial payment legs
+    try {
+      if (paymentMethod === 'mixed' && validBreakdown) {
+        if ((validBreakdown.cash || 0) > 0) {
+          await cashService.registerMovement({
+            type: 'INCOME',
+            amount: validBreakdown.cash!,
+            paymentMethod: 'cash',
+            description: `Venta #${saleId.slice(-6)} (Efectivo - Pago combinado)`,
+            date: operatingDate,
+            sourceType: 'SALE',
+            sourceId: saleId,
+            locationId: targetLocationKey,
+          });
+        }
+        if ((validBreakdown.mercado_pago || 0) > 0) {
+          await cashService.registerMovement({
+            type: 'INCOME',
+            amount: validBreakdown.mercado_pago!,
+            paymentMethod: 'mercado_pago',
+            description: `Venta #${saleId.slice(-6)} (Mercado Pago - Pago combinado)`,
+            date: operatingDate,
+            sourceType: 'SALE',
+            sourceId: saleId,
+            locationId: targetLocationKey,
+          });
+        }
+        if ((validBreakdown.transfer || 0) > 0) {
+          await cashService.registerMovement({
+            type: 'INCOME',
+            amount: validBreakdown.transfer!,
+            paymentMethod: 'transfer',
+            description: `Venta #${saleId.slice(-6)} (Transferencia - Pago combinado)`,
+            date: operatingDate,
+            sourceType: 'SALE',
+            sourceId: saleId,
+            locationId: targetLocationKey,
+          });
+        }
+      } else if (paymentMethod !== 'credit') {
+        const pm: any = paymentMethod === 'mercado_pago' ? 'mercado_pago' : paymentMethod === 'transfer' ? 'transfer' : 'cash';
         await cashService.registerMovement({
           type: 'INCOME',
           amount: totalAmount,
@@ -242,9 +326,9 @@ export const salesService = {
           sourceId: saleId,
           locationId: targetLocationKey,
         });
-      } catch (err) {
-        console.warn('Failed auto cash registration for sale:', err);
       }
+    } catch (err) {
+      console.warn('Failed auto cash registration for sale:', err);
     }
 
     // Save to local backup
@@ -280,6 +364,7 @@ export const salesService = {
             totalAmount: data.totalAmount || 0,
             totalItemsCount: data.totalItemsCount || 0,
             paymentMethod: data.paymentMethod || 'cash',
+            paymentBreakdown: data.paymentBreakdown || undefined,
             customerId: data.customerId || undefined,
             customerName: data.customerName || undefined,
             locationId: saleLocation,
@@ -316,6 +401,7 @@ export const salesService = {
           totalAmount: data.totalAmount || 0,
           totalItemsCount: data.totalItemsCount || 0,
           paymentMethod: data.paymentMethod || 'cash',
+          paymentBreakdown: data.paymentBreakdown || undefined,
           customerId: data.customerId || undefined,
           customerName: data.customerName || undefined,
           locationId: data.locationId || 'aimogasta',
@@ -335,7 +421,7 @@ export const salesService = {
    * Cancel an existing sale atomically:
    * 1. Checks if already cancelled (idempotency & concurrency guard).
    * 2. Restores product stocks in the original branch.
-   * 3. Cancels the associated cash movement (if cash/mercado_pago/transfer) or debt movement (if fiado).
+   * 3. Cancels the associated cash movement(s) (if cash/mercado_pago/transfer/mixed) or debt movement(s) (if fiado/mixed).
    * 4. Updates sale status to CANCELLED with cancelledAt and reason.
    */
   async cancelSale(saleId: string, reason: string): Promise<SaleRecord> {
@@ -345,36 +431,31 @@ export const salesService = {
     const nowIso = new Date().toISOString();
     const cleanReason = reason.trim();
 
-    // If fiado (credit), search for the debt movement in account_movements first
+    // If fiado or mixed with credit, search for debt movements in account_movements
     const debtQ = query(
       collection(db, MOVEMENTS_COLLECTION), 
       where('saleId', '==', saleId),
       where('type', '==', 'DEBT')
     );
     const debtSnap = await getDocs(debtQ);
-    let targetDebtDocRef: any = null;
-    if (!debtSnap.empty) {
-      if (debtSnap.docs.length > 1) {
-        throw new Error('Se encontraron múltiples movimientos de deuda para esta venta. Por seguridad, la operación no puede revertirse automáticamente.');
-      }
-      targetDebtDocRef = debtSnap.docs[0].ref;
-    }
+    const targetDebtDocRefs: any[] = debtSnap.docs.map(d => d.ref);
 
-    // Look up potential cash movement document
+    // Look up potential cash movement documents
+    const cashMovementsToCancelRefs: any[] = [];
     const cashMovDocRef = doc(db, 'cash_movements', `mov_cash_sale_${saleId}`);
-    let existingCashMovRef: any = null;
     const cashDocDirect = await getDoc(cashMovDocRef);
     if (cashDocDirect.exists()) {
-      existingCashMovRef = cashMovDocRef;
-    } else {
-      const cashQ = query(
-        collection(db, 'cash_movements'),
-        where('sourceType', '==', 'SALE'),
-        where('sourceId', '==', saleId)
-      );
-      const cashSnap = await getDocs(cashQ);
-      if (!cashSnap.empty) {
-        existingCashMovRef = cashSnap.docs[0].ref;
+      cashMovementsToCancelRefs.push(cashMovDocRef);
+    }
+    const cashQ = query(
+      collection(db, 'cash_movements'),
+      where('sourceType', '==', 'SALE'),
+      where('sourceId', '==', saleId)
+    );
+    const cashSnap = await getDocs(cashQ);
+    for (const cDoc of cashSnap.docs) {
+      if (!cashMovementsToCancelRefs.some(r => r.id === cDoc.id)) {
+        cashMovementsToCancelRefs.push(cDoc.ref);
       }
     }
 
@@ -398,21 +479,9 @@ export const salesService = {
       const locKey = saleData.locationId || 'aimogasta';
       const items: SaleItemRecord[] = saleData.items || [];
 
-      // If fiado sale, verify that debt movement was found
-      if (paymentMethod === 'credit') {
-        if (!targetDebtDocRef) {
-          throw new Error('No se puede identificar inequívocamente el movimiento de deuda correspondiente a esta venta fiada para revertirla de forma segura.');
-        }
-        const debtDocSnap = await transaction.get(targetDebtDocRef);
-        if ((debtDocSnap.data() as any)?.status === 'CANCELLED') {
-          throw new Error('El movimiento de deuda asociado a esta venta ya fue anulado previamente.');
-        }
-      }
-
-      // Check cash movement if present
-      let cashSnapInTx: any = null;
-      if (existingCashMovRef) {
-        cashSnapInTx = await transaction.get(existingCashMovRef);
+      // If pure fiado sale, verify that debt movement was found
+      if (paymentMethod === 'credit' && targetDebtDocRefs.length === 0) {
+        throw new Error('No se puede identificar el movimiento de deuda correspondiente a esta venta fiada.');
       }
 
       // Read product documents inside transaction
@@ -427,6 +496,24 @@ export const salesService = {
             item,
             data: pSnap.data() as Product,
           });
+        }
+      }
+
+      // Read all associated debt documents inside transaction before any writes
+      const validDebtRefsToUpdate: any[] = [];
+      for (const dRef of targetDebtDocRefs) {
+        const dSnap = await transaction.get(dRef);
+        if (dSnap.exists() && (dSnap.data() as any)?.status !== 'CANCELLED') {
+          validDebtRefsToUpdate.push(dRef);
+        }
+      }
+
+      // Read all associated cash movement documents inside transaction before any writes
+      const validCashRefsToUpdate: any[] = [];
+      for (const cRef of cashMovementsToCancelRefs) {
+        const cSnap = await transaction.get(cRef);
+        if (cSnap.exists() && (cSnap.data() as any)?.status !== 'CANCELLED') {
+          validCashRefsToUpdate.push(cRef);
         }
       }
 
@@ -460,9 +547,9 @@ export const salesService = {
         });
       }
 
-      // B: If fiado, cancel debt movement
-      if (paymentMethod === 'credit' && targetDebtDocRef) {
-        transaction.update(targetDebtDocRef, {
+      // B: Cancel all associated debt movements
+      for (const dRef of validDebtRefsToUpdate) {
+        transaction.update(dRef, {
           status: 'CANCELLED',
           cancelledAt: serverTimestamp(),
           cancelledAtIso: nowIso,
@@ -470,9 +557,9 @@ export const salesService = {
         });
       }
 
-      // C: If cash movement found, cancel it
-      if (existingCashMovRef && cashSnapInTx && cashSnapInTx.exists()) {
-        transaction.update(existingCashMovRef, {
+      // C: Cancel all associated cash movements
+      for (const cRef of validCashRefsToUpdate) {
+        transaction.update(cRef, {
           status: 'CANCELLED',
           cancelledAt: serverTimestamp(),
           cancelledAtIso: nowIso,
@@ -495,6 +582,7 @@ export const salesService = {
         totalAmount: saleData.totalAmount || 0,
         totalItemsCount: saleData.totalItemsCount || 0,
         paymentMethod: saleData.paymentMethod || 'cash',
+        paymentBreakdown: saleData.paymentBreakdown || undefined,
         customerId: saleData.customerId,
         customerName: saleData.customerName,
         locationId: locKey,
@@ -515,33 +603,41 @@ export const salesService = {
       }
       saveLocalSales(localSales);
 
-      // Local account movements update if fiado
-      if (returnedSaleRecord.paymentMethod === 'credit') {
-        try {
-          const rawAcc = localStorage.getItem('despensa_stock_local_account_movements');
-          if (rawAcc) {
-            const localMovs = JSON.parse(rawAcc);
-            const mIdx = localMovs.findIndex((m: any) => m.saleId === saleId && m.type === 'DEBT');
-            if (mIdx >= 0) {
-              localMovs[mIdx].status = 'CANCELLED';
-              localMovs[mIdx].cancelledAt = nowIso;
-              localMovs[mIdx].cancellationReason = cleanReason;
-              localStorage.setItem('despensa_stock_local_account_movements', JSON.stringify(localMovs));
+      // Local account movements update if fiado or mixed
+      try {
+        const rawAcc = localStorage.getItem('despensa_stock_local_account_movements');
+        if (rawAcc) {
+          const localMovs = JSON.parse(rawAcc);
+          let changed = false;
+          for (let i = 0; i < localMovs.length; i++) {
+            if (localMovs[i].saleId === saleId && localMovs[i].type === 'DEBT') {
+              localMovs[i].status = 'CANCELLED';
+              localMovs[i].cancelledAt = nowIso;
+              localMovs[i].cancellationReason = cleanReason;
+              changed = true;
             }
           }
-        } catch {}
-      }
+          if (changed) {
+            localStorage.setItem('despensa_stock_local_account_movements', JSON.stringify(localMovs));
+          }
+        }
+      } catch {}
 
       // Local cash movements update
       try {
         const rawCash = localStorage.getItem('despensa_stock_local_cash_movements');
         if (rawCash) {
           const localCash = JSON.parse(rawCash);
-          const cIdx = localCash.findIndex((c: any) => c.sourceType === 'SALE' && c.sourceId === saleId);
-          if (cIdx >= 0) {
-            localCash[cIdx].status = 'CANCELLED';
-            localCash[cIdx].cancelledAt = nowIso;
-            localCash[cIdx].cancellationReason = cleanReason;
+          let changed = false;
+          for (let i = 0; i < localCash.length; i++) {
+            if (localCash[i].sourceType === 'SALE' && localCash[i].sourceId === saleId) {
+              localCash[i].status = 'CANCELLED';
+              localCash[i].cancelledAt = nowIso;
+              localCash[i].cancellationReason = cleanReason;
+              changed = true;
+            }
+          }
+          if (changed) {
             localStorage.setItem('despensa_stock_local_cash_movements', JSON.stringify(localCash));
           }
         }
