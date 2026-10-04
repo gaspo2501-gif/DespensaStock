@@ -13,12 +13,16 @@ import {
   FileText,
   Loader2,
   AlertCircle,
-  Ban
+  Ban,
+  Wallet,
+  CreditCard,
+  DollarSign
 } from 'lucide-react';
 import { Purchase } from '../../types/purchase';
 import { purchaseService } from '../../services/firebase/purchaseService';
 import { getLocationName } from '../../types/location';
 import { CancelOperationModal } from './CancelOperationModal';
+import { SupplierPaymentModal } from '../provider/SupplierPaymentModal';
 import { formatLocalDateTime } from '../../utils/dateUtils';
 
 interface PurchaseDetailModalProps {
@@ -40,6 +44,15 @@ export const PurchaseDetailModal: React.FC<PurchaseDetailModalProps> = ({
   const [loading, setLoading] = useState<boolean>(!initialPurchase && !!purchaseId);
   const [error, setError] = useState<string | null>(null);
   const [isCancelModalOpen, setIsCancelModalOpen] = useState<boolean>(false);
+  const [showPaymentModal, setShowPaymentModal] = useState<boolean>(false);
+
+  const reloadPurchase = () => {
+    if (purchase?.id) {
+      purchaseService.getPurchaseById(purchase.id).then((p) => {
+        if (p) setPurchase(p);
+      });
+    }
+  };
 
   useEffect(() => {
     if (initialPurchase) {
@@ -285,6 +298,70 @@ export const PurchaseDetailModal: React.FC<PurchaseDetailModalProps> = ({
                 </div>
               </div>
 
+              {/* Payment & Checking Account Status */}
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-200/70 pb-2.5">
+                  <span className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                    <CreditCard className="w-4 h-4 text-indigo-600" />
+                    <span>Estado del Pago y Cuenta Corriente</span>
+                  </span>
+                  <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-full ${
+                    (purchase.pendingAmount || 0) <= 0.01 || purchase.paymentStatus === 'PAID'
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : (purchase.paidAmount || 0) > 0
+                      ? 'bg-amber-100 text-amber-800'
+                      : 'bg-rose-100 text-rose-800'
+                  }`}>
+                    {(purchase.pendingAmount || 0) <= 0.01 || purchase.paymentStatus === 'PAID' 
+                      ? 'PAGADA' 
+                      : (purchase.paidAmount || 0) > 0 
+                      ? 'PAGO PARCIAL' 
+                      : 'PENDIENTE DE PAGO'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
+                  <div className="p-2.5 bg-white rounded-xl border border-slate-200/80">
+                    <span className="text-[10px] font-sans font-extrabold uppercase text-slate-400 block">Total Compra</span>
+                    <span className="font-bold text-slate-900">${(purchase.totalAmount || 0).toLocaleString('es-AR')}</span>
+                  </div>
+                  <div className="p-2.5 bg-white rounded-xl border border-slate-200/80">
+                    <span className="text-[10px] font-sans font-extrabold uppercase text-slate-400 block">Pagos Realizados</span>
+                    <span className="font-bold text-emerald-700">${(purchase.paidAmount || (purchase.paymentStatus === 'PAID' ? purchase.totalAmount : 0)).toLocaleString('es-AR')}</span>
+                  </div>
+                  <div className="p-2.5 bg-white rounded-xl border border-slate-200/80">
+                    <span className="text-[10px] font-sans font-extrabold uppercase text-slate-400 block">Saldo Pendiente</span>
+                    <span className={`font-bold ${(purchase.pendingAmount || 0) > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
+                      ${(purchase.pendingAmount !== undefined ? purchase.pendingAmount : (purchase.paymentStatus === 'PAID' ? 0 : purchase.totalAmount)).toLocaleString('es-AR')}
+                    </span>
+                  </div>
+                  <div className="p-2.5 bg-white rounded-xl border border-slate-200/80">
+                    <span className="text-[10px] font-sans font-extrabold uppercase text-slate-400 block">Medio / Origen</span>
+                    <span className="font-bold text-slate-700 truncate block">
+                      {purchase.paidFrom === 'caja_general' ? 'Caja General' : purchase.paidFrom === 'mercado_pago' ? 'Mercado Pago' : purchase.paidFrom === 'transfer' ? 'Transferencia' : purchase.paidFrom === 'caja_diaria' ? 'Caja Diaria' : (purchase.paymentMethod || 'Efectivo')}
+                    </span>
+                  </div>
+                </div>
+
+                {/* If pending debt, show button to register payment */}
+                {purchase.status !== 'CANCELLED' && ((purchase.pendingAmount !== undefined ? purchase.pendingAmount : (purchase.paymentStatus === 'PAID' ? 0 : purchase.totalAmount)) > 0) && (
+                  <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white p-3 rounded-xl border border-slate-200">
+                    <div>
+                      <p className="text-xs font-bold text-slate-800">¿Deseas registrar un pago para esta compra?</p>
+                      <p className="text-[11px] text-slate-500">Cancela la deuda con el proveedor y registra la salida del fondo seleccionado.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowPaymentModal(true)}
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1 shrink-0"
+                    >
+                      <DollarSign className="w-3.5 h-3.5" />
+                      <span>Registrar Pago</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
               {/* Total Purchase Amount */}
               <div className="p-4 bg-slate-900 text-white rounded-2xl flex items-center justify-between shadow-md">
                 <div>
@@ -339,6 +416,21 @@ export const PurchaseDetailModal: React.FC<PurchaseDetailModalProps> = ({
             onConfirm={async (reason) => {
               const cancelled = await purchaseService.cancelPurchase(purchase.id, reason);
               setPurchase(cancelled);
+              onOperationCancelled?.();
+            }}
+          />
+        )}
+
+        {/* Supplier Payment Modal */}
+        {showPaymentModal && purchase && (
+          <SupplierPaymentModal
+            providerId={purchase.providerId}
+            providerName={purchase.providerName}
+            purchaseId={purchase.id}
+            pendingAmount={purchase.pendingAmount !== undefined ? purchase.pendingAmount : (purchase.paymentStatus === 'PAID' ? 0 : purchase.totalAmount)}
+            onClose={() => setShowPaymentModal(false)}
+            onPaymentSuccess={() => {
+              reloadPurchase();
               onOperationCancelled?.();
             }}
           />

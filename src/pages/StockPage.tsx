@@ -12,6 +12,7 @@ import { PurchaseDetailModal } from '../components/modals/PurchaseDetailModal';
 import { StockTransferDetailModal } from '../components/modals/StockTransferDetailModal';
 import { ProductDetailModal } from '../components/modals/ProductDetailModal';
 import { ProductEditModal } from '../components/modals/ProductEditModal';
+import { ProvidersView } from '../components/provider/ProvidersView';
 import { StockTransferRecord } from '../types/stockTransfer';
 import { productService } from '../services/firebase/productService';
 import { providerService } from '../services/firebase/providerService';
@@ -51,10 +52,10 @@ interface StockPageProps {
   onProductsUpdated: (updatedProducts: Product[]) => void;
   onProductSaved: (product: Product) => void;
   onBackToHome: () => void;
-  initialMode?: 'products' | 'purchase' | 'transfers';
+  initialMode?: 'products' | 'purchase' | 'transfers' | 'providers';
 }
 
-export type StockSubTab = 'products' | 'purchase' | 'transfers';
+export type StockSubTab = 'products' | 'purchase' | 'transfers' | 'providers';
 
 export const StockPage: React.FC<StockPageProps> = ({
   products,
@@ -373,14 +374,14 @@ export const StockPage: React.FC<StockPageProps> = ({
         </div>
       </div>
 
-      {/* 2. SUB-NAVIGATION TABS: Productos | Ingresar mercadería | Transferencias */}
-      <div className="flex items-center gap-2 p-1.5 bg-white border border-slate-200 rounded-2xl shadow-2xs">
+      {/* 2. SUB-NAVIGATION TABS: Productos | Ingresar mercadería | Transferencias | Proveedores */}
+      <div className="flex items-center gap-1.5 p-1.5 bg-white border border-slate-200 rounded-2xl shadow-2xs overflow-x-auto">
         <button
           onClick={() => {
             setSubTab('products');
             setIsCameraActive(false);
           }}
-          className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+          className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
             subTab === 'products'
               ? 'bg-emerald-600 text-white shadow-sm'
               : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
@@ -395,7 +396,7 @@ export const StockPage: React.FC<StockPageProps> = ({
             setSubTab('purchase');
             setIsCameraActive(false);
           }}
-          className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+          className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
             subTab === 'purchase'
               ? 'bg-emerald-600 text-white shadow-sm'
               : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
@@ -410,7 +411,7 @@ export const StockPage: React.FC<StockPageProps> = ({
             setSubTab('transfers');
             setIsCameraActive(false);
           }}
-          className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+          className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
             subTab === 'transfers'
               ? 'bg-emerald-600 text-white shadow-sm'
               : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
@@ -418,6 +419,21 @@ export const StockPage: React.FC<StockPageProps> = ({
         >
           <ArrowLeftRight className="w-4 h-4" />
           <span>Transferencias</span>
+        </button>
+
+        <button
+          onClick={() => {
+            setSubTab('providers');
+            setIsCameraActive(false);
+          }}
+          className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
+            subTab === 'providers'
+              ? 'bg-indigo-600 text-white shadow-sm'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+          }`}
+        >
+          <Building2 className="w-4 h-4" />
+          <span>Proveedores</span>
         </button>
       </div>
 
@@ -943,6 +959,18 @@ export const StockPage: React.FC<StockPageProps> = ({
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* 6. TAB 4: PROVEEDORES (SUPPLIERS & CHECKING ACCOUNTS) */}
+      {subTab === 'providers' && (
+        <div className="animate-fadeIn">
+          <ProvidersView
+            onSelectPurchase={(purchId) => setSelectedPurchaseIdForDetail(purchId)}
+            onNewPurchaseForProvider={(prov) => {
+              setSubTab('purchase');
+            }}
+          />
         </div>
       )}
 

@@ -10,7 +10,9 @@ import {
   SupplierStat, 
   ExpenseCategoryStat, 
   TopDebtor, 
-  ReportAlert 
+  ReportAlert,
+  SoldProductCostDetail,
+  CollectedPaymentDetail
 } from '../types/report';
 import { salesService } from './firebase/salesService';
 import { productService } from './firebase/productService';
@@ -366,6 +368,8 @@ export const reportsService = {
     let totalEstimatedCogs = 0;
     let hasIncompleteCostData = false;
 
+    const soldProductsCostMap = new Map<string, SoldProductCostDetail>();
+
     currentSales.forEach(s => {
       s.items.forEach(item => {
         const pId = item.productId || item.name;
@@ -388,6 +392,23 @@ export const reportsService = {
         } else {
           hasIncompleteCostData = true;
         }
+
+        const costNum = (cost !== undefined && cost > 0) ? cost : 0;
+        const prevCostItem = soldProductsCostMap.get(pId) || {
+          productId: pId,
+          name: item.name || p?.name || 'Producto',
+          brand: item.brand || p?.brand,
+          presentation: item.presentation || p?.presentation,
+          quantitySold: 0,
+          unitCost: costNum,
+          totalCost: 0,
+          revenue: 0,
+          hasCost: cost !== undefined && cost > 0,
+        };
+        prevCostItem.quantitySold += item.quantity || 0;
+        prevCostItem.revenue += item.subtotal || 0;
+        prevCostItem.totalCost += (cost !== undefined && cost > 0) ? cost * (item.quantity || 0) : 0;
+        soldProductsCostMap.set(pId, prevCostItem);
       });
     });
 
@@ -672,7 +693,85 @@ export const reportsService = {
         outOfStockCount,
         lowStockCount
       },
-      alerts
+      alerts,
+      traceability: {
+        sales: currentSales,
+        collectedMovements: (() => {
+          const list: CollectedPaymentDetail[] = [];
+          currentSales.forEach(s => {
+            const sDate = s.date || toArgentinaDateString(s.createdAt) || 'Hoy';
+            if (s.paymentMethod === 'mixed' && s.paymentBreakdown) {
+              const bd = s.paymentBreakdown;
+              if ((bd.cash || 0) > 0) {
+                list.push({
+                  id: `${s.id}_cash`,
+                  type: 'sale',
+                  description: `Venta #${s.id.slice(-6)} (Parte Efectivo)`,
+                  amount: bd.cash!,
+                  paymentMethod: 'Efectivo',
+                  date: sDate,
+                  referenceId: s.id,
+                });
+              }
+              if ((bd.mercado_pago || 0) > 0) {
+                list.push({
+                  id: `${s.id}_mp`,
+                  type: 'sale',
+                  description: `Venta #${s.id.slice(-6)} (Parte Mercado Pago)`,
+                  amount: bd.mercado_pago!,
+                  paymentMethod: 'Mercado Pago',
+                  date: sDate,
+                  referenceId: s.id,
+                });
+              }
+              if ((bd.transfer || 0) > 0) {
+                list.push({
+                  id: `${s.id}_trans`,
+                  type: 'sale',
+                  description: `Venta #${s.id.slice(-6)} (Parte Transferencia)`,
+                  amount: bd.transfer!,
+                  paymentMethod: 'Transferencia',
+                  date: sDate,
+                  referenceId: s.id,
+                });
+              }
+            } else if (s.paymentMethod !== 'credit') {
+              const pmLabel = s.paymentMethod === 'mercado_pago' ? 'Mercado Pago' : s.paymentMethod === 'transfer' ? 'Transferencia' : 'Efectivo';
+              list.push({
+                id: s.id,
+                type: 'sale',
+                description: `Venta #${s.id.slice(-6)} (${s.customerName || 'Consumidor Final'})`,
+                amount: s.totalAmount || 0,
+                paymentMethod: pmLabel,
+                date: sDate,
+                referenceId: s.id,
+              });
+            }
+          });
+
+          allCustomerMovements.forEach(m => {
+            const d = parseDate(m.createdAt);
+            if (d >= range.start && d <= range.end && m.type === 'PAYMENT') {
+              list.push({
+                id: m.id,
+                type: 'customer_payment',
+                description: `Cobro Cta. Cte.: ${m.customerName || 'Cliente'}`,
+                amount: m.amount || 0,
+                paymentMethod: (m as any).paymentMethod === 'mercado_pago' ? 'Mercado Pago' : (m as any).paymentMethod === 'transfer' ? 'Transferencia' : 'Efectivo',
+                date: toArgentinaDateString(m.createdAt) || 'Hoy',
+                referenceId: m.customerId,
+              });
+            }
+          });
+
+          return list.sort((a, b) => b.date.localeCompare(a.date));
+        })(),
+        creditSales: currentSales.filter(s => s.paymentMethod === 'credit' || ((s.paymentBreakdown?.credit || 0) > 0)),
+        debtors: topDebtorsList,
+        purchases: currentPurchases,
+        expenses: currentExpenses,
+        soldProductsWithCost: Array.from(soldProductsCostMap.values()).sort((a, b) => b.revenue - a.revenue),
+      }
     };
   },
 

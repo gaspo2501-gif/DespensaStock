@@ -81,6 +81,11 @@ export const PurchaseEntry: React.FC<PurchaseEntryProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [completedPurchase, setCompletedPurchase] = useState<Purchase | null>(null);
 
+  // Payment condition state
+  const [paymentCondition, setPaymentCondition] = useState<'PAID' | 'PENDING' | 'PARTIAL'>('PAID');
+  const [customPaidAmount, setCustomPaidAmount] = useState<number>(0);
+  const [purchasePaidFrom, setPurchasePaidFrom] = useState<'caja_diaria' | 'caja_general' | 'mercado_pago' | 'transfer' | 'other'>('caja_diaria');
+
   // Calculate suggested sale price dynamically
   const pendingSuggestedSalePrice = calculateSuggestedSalePrice(pendingCost);
 
@@ -280,12 +285,19 @@ export const PurchaseEntry: React.FC<PurchaseEntryProps> = ({
     setIsConfirming(true);
     setErrorMsg(null);
 
+    const paidAmount = paymentCondition === 'PAID' ? totalAmount : paymentCondition === 'PENDING' ? 0 : Math.min(totalAmount, customPaidAmount);
+    const paymentStatus = paymentCondition;
+    const paidFrom = paidAmount > 0 ? purchasePaidFrom : undefined;
+
     try {
       const result = await purchaseService.processPurchase({
         providerId: selectedProvider!.id,
         providerName: selectedProvider!.name,
         items: draftItems,
         locationId: activeLocation,
+        paymentStatus,
+        paidAmount,
+        paidFrom,
       });
 
       playScanSound('success');
@@ -565,6 +577,141 @@ export const PurchaseEntry: React.FC<PurchaseEntryProps> = ({
                   <span className="text-emerald-400">Monto Total del Ingreso:</span>
                   <span className="font-mono text-xl text-emerald-400">${totalAmount.toLocaleString('es-AR')}</span>
                 </div>
+              </div>
+
+              {/* PAYMENT TERMS & FUNDS SELECTION */}
+              <div className="p-4 bg-white border border-slate-200 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                  <span className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                    <DollarSign className="w-4 h-4 text-emerald-600" />
+                    <span>Condición de Pago de la Mercadería</span>
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setPaymentCondition('PAID')}
+                    className={`p-2.5 rounded-xl border font-bold transition-all text-center ${
+                      paymentCondition === 'PAID'
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-300 ring-2 ring-emerald-500/20'
+                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    Pagada Total
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPaymentCondition('PENDING')}
+                    className={`p-2.5 rounded-xl border font-bold transition-all text-center ${
+                      paymentCondition === 'PENDING'
+                        ? 'bg-rose-50 text-rose-800 border-rose-300 ring-2 ring-rose-500/20'
+                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    Pendiente (Deuda)
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPaymentCondition('PARTIAL');
+                      if (customPaidAmount <= 0) setCustomPaidAmount(Math.round(totalAmount / 2));
+                    }}
+                    className={`p-2.5 rounded-xl border font-bold transition-all text-center ${
+                      paymentCondition === 'PARTIAL'
+                        ? 'bg-amber-50 text-amber-800 border-amber-300 ring-2 ring-amber-500/20'
+                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    Pago Parcial
+                  </button>
+                </div>
+
+                {/* Partial amount input if partial */}
+                {paymentCondition === 'PARTIAL' && (
+                  <div className="pt-2 border-t border-slate-100 space-y-1">
+                    <label className="block text-[11px] font-bold text-slate-700">
+                      Importe a Abonar Ahora ($)
+                    </label>
+                    <NumericInput
+                      min="0.01"
+                      max={totalAmount}
+                      step="any"
+                      allowDecimal={true}
+                      value={customPaidAmount}
+                      onChangeValue={(val) => setCustomPaidAmount(val)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-mono font-bold text-sm text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                    />
+                    <div className="text-[10px] text-slate-500 flex justify-between">
+                      <span>Resta pagar a cuenta corriente:</span>
+                      <strong className="font-mono text-rose-700">${Math.max(0, totalAmount - customPaidAmount).toLocaleString('es-AR')}</strong>
+                    </div>
+                  </div>
+                )}
+
+                {/* Fund Origin Selection if paying now */}
+                {paymentCondition !== 'PENDING' && (
+                  <div className="pt-2 border-t border-slate-100 space-y-1.5">
+                    <label className="block text-[11px] font-bold text-slate-700">
+                      Origen de los Fondos para el Pago
+                    </label>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setPurchasePaidFrom('caja_diaria')}
+                        className={`p-2 rounded-xl border text-left font-bold transition-all ${
+                          purchasePaidFrom === 'caja_diaria'
+                            ? 'bg-emerald-50 text-emerald-800 border-emerald-300 ring-2 ring-emerald-500/20'
+                            : 'bg-slate-50 text-slate-600 border-slate-200'
+                        }`}
+                      >
+                        <span className="block text-[11px]">Caja Diaria (Local)</span>
+                        <span className="text-[9px] font-normal text-slate-500">Descuenta del cajón de hoy</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setPurchasePaidFrom('caja_general')}
+                        className={`p-2 rounded-xl border text-left font-bold transition-all ${
+                          purchasePaidFrom === 'caja_general'
+                            ? 'bg-indigo-50 text-indigo-800 border-indigo-300 ring-2 ring-indigo-500/20'
+                            : 'bg-slate-50 text-slate-600 border-slate-200'
+                        }`}
+                      >
+                        <span className="block text-[11px]">Caja General</span>
+                        <span className="text-[9px] font-normal text-slate-500">Fondo general acumulado</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setPurchasePaidFrom('mercado_pago')}
+                        className={`p-2 rounded-xl border text-left font-bold transition-all ${
+                          purchasePaidFrom === 'mercado_pago'
+                            ? 'bg-sky-50 text-sky-800 border-sky-300 ring-2 ring-sky-500/20'
+                            : 'bg-slate-50 text-slate-600 border-slate-200'
+                        }`}
+                      >
+                        <span className="block text-[11px]">Mercado Pago</span>
+                        <span className="text-[9px] font-normal text-slate-500">Saldo digital MP</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setPurchasePaidFrom('transfer')}
+                        className={`p-2 rounded-xl border text-left font-bold transition-all ${
+                          purchasePaidFrom === 'transfer'
+                            ? 'bg-purple-50 text-purple-800 border-purple-300 ring-2 ring-purple-500/20'
+                            : 'bg-slate-50 text-slate-600 border-slate-200'
+                        }`}
+                      >
+                        <span className="block text-[11px]">Transferencia</span>
+                        <span className="text-[9px] font-normal text-slate-500">Cuenta bancaria</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Dynamic Validation Feedback Banner */}

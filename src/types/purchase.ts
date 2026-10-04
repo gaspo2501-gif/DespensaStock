@@ -39,6 +39,11 @@ export interface Purchase {
   status?: 'ACTIVE' | 'CANCELLED';
   cancelledAt?: string;
   cancellationReason?: string;
+  paymentStatus?: 'PAID' | 'PENDING' | 'PARTIAL';
+  paidAmount?: number;
+  pendingAmount?: number;
+  paidFrom?: 'caja_diaria' | 'caja_general' | 'mercado_pago' | 'transfer' | 'other';
+  paymentMethod?: 'cash' | 'mercado_pago' | 'transfer' | 'other';
 }
 
 export interface ProcessPurchaseItemInput {
@@ -56,4 +61,7 @@ export interface ProcessPurchaseInput {
   providerName: string;
   locationId?: string;
   items: ProcessPurchaseItemInput[];
+  paymentStatus?: 'PAID' | 'PENDING' | 'PARTIAL';
+  paidAmount?: number;
+  paidFrom?: 'caja_diaria' | 'caja_general' | 'mercado_pago' | 'transfer' | 'other';
 }

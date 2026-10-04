@@ -16,6 +16,8 @@ import { LocationSelector } from '../components/common/LocationSelector';
 import { PurchaseDetailModal } from '../components/modals/PurchaseDetailModal';
 import { CustomerDetailModal } from '../components/customer/CustomerDetailModal';
 import { SalesHistoryModal } from '../components/modals/SalesHistoryModal';
+import { SaleDetailModal } from '../components/modals/SaleDetailModal';
+import { ReportTraceabilityModal, TraceabilityMetricType } from '../components/modals/ReportTraceabilityModal';
 import { getArgentinaFirstOfMonth, getArgentinaToday, formatLocalDate } from '../utils/dateUtils';
 import { 
   BarChart3, 
@@ -79,6 +81,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ products, onNavigate }
   const [selectedPurchaseIdForDetail, setSelectedPurchaseIdForDetail] = useState<string | null>(null);
   const [selectedCustomerForDetail, setSelectedCustomerForDetail] = useState<Customer | null>(null);
   const [showSalesHistory, setShowSalesHistory] = useState<boolean>(false);
+  const [activeTraceability, setActiveTraceability] = useState<TraceabilityMetricType | null>(null);
+  const [selectedSaleIdForDetail, setSelectedSaleIdForDetail] = useState<string | null>(null);
 
   const handleOpenCustomerDetail = async (customerId: string, customerName?: string) => {
     try {
@@ -347,27 +351,45 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ products, onNavigate }
 
           {/* MAIN KPI GRID (RESUMEN GENERAL) */}
           <div className="space-y-3">
-            <h2 className="text-xs font-black uppercase tracking-wider text-slate-500">
-              Resumen General Comercial
-            </h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-black uppercase tracking-wider text-slate-500">
+                Resumen General Comercial (Toca un valor para ver su composición)
+              </h2>
+              <span className="text-[10px] text-slate-400 font-semibold hidden sm:inline">
+                Trazabilidad 100% clickeable
+              </span>
+            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
               {/* 1. FACTURACIÓN */}
-              <div className="p-4 bg-white border border-slate-200/90 rounded-2xl shadow-2xs space-y-2 relative overflow-hidden">
+              <div 
+                onClick={() => setActiveTraceability('facturacion')}
+                className="p-4 bg-white border border-slate-200/90 hover:border-emerald-400 rounded-2xl shadow-2xs hover:shadow-md space-y-2 relative overflow-hidden cursor-pointer transition-all active:scale-[0.99] group"
+                title="Tocar para ver las ventas que componen esta facturación"
+              >
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-extrabold uppercase text-slate-500 tracking-wider">💰 Facturación</span>
                   {renderComparisonPill(report.sales.revenueComparison)}
                 </div>
                 <div>
-                  <p className="text-2xl font-black text-slate-900">
+                  <p className="text-2xl font-black text-slate-900 group-hover:text-emerald-700 transition-colors">
                     ${report.sales.totalRevenue.toLocaleString('es-AR')}
                   </p>
-                  <p className="text-[11px] text-slate-500 font-medium">Ventas totales en el período</p>
+                  <div className="flex items-center justify-between mt-0.5">
+                    <p className="text-[11px] text-slate-500 font-medium">Ventas en el período</p>
+                    <span className="text-[10px] font-bold text-emerald-600 group-hover:underline flex items-center">
+                      Ver ventas →
+                    </span>
+                  </div>
                 </div>
               </div>
 
               {/* 2. COBRADO */}
-              <div className="p-4 bg-emerald-50/70 border border-emerald-200/90 rounded-2xl shadow-2xs space-y-2">
+              <div 
+                onClick={() => setActiveTraceability('cobrado')}
+                className="p-4 bg-emerald-50/70 border border-emerald-200/90 hover:border-emerald-400 rounded-2xl shadow-2xs hover:shadow-md space-y-2 cursor-pointer transition-all active:scale-[0.99] group"
+                title="Tocar para ver qué cobros forman este importe"
+              >
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-extrabold uppercase text-emerald-800 tracking-wider">💵 Cobrado</span>
                   <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">Efectivo/MP/Transf</span>
@@ -376,12 +398,21 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ products, onNavigate }
                   <p className="text-2xl font-black text-emerald-900">
                     ${report.sales.collectedAmount.toLocaleString('es-AR')}
                   </p>
-                  <p className="text-[11px] text-emerald-700 font-medium">Ingreso efectivamente cobrado</p>
+                  <div className="flex items-center justify-between mt-0.5">
+                    <p className="text-[11px] text-emerald-700 font-medium">Ingreso efectivamente cobrado</p>
+                    <span className="text-[10px] font-bold text-emerald-800 group-hover:underline flex items-center">
+                      Ver cobros →
+                    </span>
+                  </div>
                 </div>
               </div>
 
               {/* 3. VENTAS FIADAS */}
-              <div className="p-4 bg-amber-50/70 border border-amber-200/90 rounded-2xl shadow-2xs space-y-2">
+              <div 
+                onClick={() => setActiveTraceability('ventas_fiadas')}
+                className="p-4 bg-amber-50/70 border border-amber-200/90 hover:border-amber-400 rounded-2xl shadow-2xs hover:shadow-md space-y-2 cursor-pointer transition-all active:scale-[0.99] group"
+                title="Tocar para ver las ventas fiadas del período"
+              >
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-extrabold uppercase text-amber-800 tracking-wider">📋 Ventas Fiadas</span>
                   <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">En el período</span>
@@ -390,12 +421,21 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ products, onNavigate }
                   <p className="text-2xl font-black text-amber-900">
                     ${report.sales.creditSalesAmount.toLocaleString('es-AR')}
                   </p>
-                  <p className="text-[11px] text-amber-700 font-medium">A crédito (no ingresó caja aún)</p>
+                  <div className="flex items-center justify-between mt-0.5">
+                    <p className="text-[11px] text-amber-700 font-medium">A crédito (no ingresó caja aún)</p>
+                    <span className="text-[10px] font-bold text-amber-800 group-hover:underline flex items-center">
+                      Ver fiados →
+                    </span>
+                  </div>
                 </div>
               </div>
 
               {/* 4. CUENTAS POR COBRAR (DEUDA ACTUAL GLOBAL) */}
-              <div className="p-4 bg-purple-50/70 border border-purple-200/90 rounded-2xl shadow-2xs space-y-2">
+              <div 
+                onClick={() => setActiveTraceability('cuentas_por_cobrar')}
+                className="p-4 bg-purple-50/70 border border-purple-200/90 hover:border-purple-400 rounded-2xl shadow-2xs hover:shadow-md space-y-2 cursor-pointer transition-all active:scale-[0.99] group"
+                title="Tocar para ver los clientes que adeudan este saldo"
+              >
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-extrabold uppercase text-purple-800 tracking-wider">💳 Cuentas por Cobrar</span>
                   <span className="text-[10px] font-bold text-purple-700 bg-purple-100 px-2 py-0.5 rounded-full">Estado Actual</span>
@@ -404,26 +444,44 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ products, onNavigate }
                   <p className="text-2xl font-black text-purple-900">
                     ${report.customerDebt.totalDebtBalance.toLocaleString('es-AR')}
                   </p>
-                  <p className="text-[11px] text-purple-700 font-medium">Adeudado por {report.customerDebt.debtorsCount} clientes</p>
+                  <div className="flex items-center justify-between mt-0.5">
+                    <p className="text-[11px] text-purple-700 font-medium">{report.customerDebt.debtorsCount} clientes con saldo</p>
+                    <span className="text-[10px] font-bold text-purple-800 group-hover:underline flex items-center">
+                      Ver deudores →
+                    </span>
+                  </div>
                 </div>
               </div>
 
               {/* 5. COMPRAS MERCADERÍA */}
-              <div className="p-4 bg-white border border-slate-200/90 rounded-2xl shadow-2xs space-y-2">
+              <div 
+                onClick={() => setActiveTraceability('compras_mercaderia')}
+                className="p-4 bg-white border border-slate-200/90 hover:border-indigo-400 rounded-2xl shadow-2xs hover:shadow-md space-y-2 cursor-pointer transition-all active:scale-[0.99] group"
+                title="Tocar para ver las compras de mercadería que forman este total"
+              >
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-extrabold uppercase text-slate-500 tracking-wider">🛒 Compras Mercadería</span>
                   {renderComparisonPill(report.purchases.purchasesComparison)}
                 </div>
                 <div>
-                  <p className="text-2xl font-black text-slate-900">
+                  <p className="text-2xl font-black text-slate-900 group-hover:text-indigo-700 transition-colors">
                     ${report.purchases.totalPurchasesAmount.toLocaleString('es-AR')}
                   </p>
-                  <p className="text-[11px] text-slate-500 font-medium">{report.purchases.totalOrdersCount} órdenes de compra</p>
+                  <div className="flex items-center justify-between mt-0.5">
+                    <p className="text-[11px] text-slate-500 font-medium">{report.purchases.totalOrdersCount} órdenes de compra</p>
+                    <span className="text-[10px] font-bold text-indigo-600 group-hover:underline flex items-center">
+                      Ver compras →
+                    </span>
+                  </div>
                 </div>
               </div>
 
               {/* 6. GASTOS OPERATIVOS */}
-              <div className="p-4 bg-rose-50/60 border border-rose-200/90 rounded-2xl shadow-2xs space-y-2">
+              <div 
+                onClick={() => setActiveTraceability('gastos_operativos')}
+                className="p-4 bg-rose-50/60 border border-rose-200/90 hover:border-rose-400 rounded-2xl shadow-2xs hover:shadow-md space-y-2 cursor-pointer transition-all active:scale-[0.99] group"
+                title="Tocar para ver los gastos individuales que forman este importe"
+              >
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-extrabold uppercase text-rose-800 tracking-wider">📉 Gastos Operativos</span>
                   {renderComparisonPill(report.expenses.expensesComparison)}
@@ -432,15 +490,26 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ products, onNavigate }
                   <p className="text-2xl font-black text-rose-900">
                     ${report.expenses.totalExpensesAmount.toLocaleString('es-AR')}
                   </p>
-                  <p className="text-[11px] text-rose-700 font-medium">{report.expenses.expenseCount} gastos registrados</p>
+                  <div className="flex items-center justify-between mt-0.5">
+                    <p className="text-[11px] text-rose-700 font-medium">{report.expenses.expenseCount} gastos registrados</p>
+                    <span className="text-[10px] font-bold text-rose-800 group-hover:underline flex items-center">
+                      Ver gastos →
+                    </span>
+                  </div>
                 </div>
               </div>
 
               {/* 7. RESULTADO ESTIMADO */}
-              <div className="p-4 bg-slate-900 text-white rounded-2xl shadow-lg space-y-2 sm:col-span-2">
+              <div 
+                onClick={() => setActiveTraceability('costo_estimado')}
+                className="p-4 bg-slate-900 text-white hover:bg-slate-850 rounded-2xl shadow-lg hover:shadow-xl space-y-2 sm:col-span-2 cursor-pointer transition-all active:scale-[0.99] group border border-slate-800 hover:border-slate-700"
+                title="Tocar para entender el cálculo del resultado estimado y costo de productos vendidos"
+              >
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-extrabold uppercase tracking-wider text-emerald-400">💰 Resultado Estimado</span>
-                  <span className="text-[10px] font-bold text-slate-300 bg-slate-800 px-2 py-0.5 rounded-full border border-slate-700">Estimación Comercial</span>
+                  <span className="text-[10px] font-bold text-slate-300 bg-slate-800 px-2 py-0.5 rounded-full border border-slate-700 group-hover:border-emerald-500/50">
+                    Tocar para ver desglose CMV →
+                  </span>
                 </div>
                 <div className="flex items-baseline justify-between gap-4">
                   <div>
@@ -448,7 +517,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ products, onNavigate }
                       ${report.estimatedResult.estimatedResult.toLocaleString('es-AR')}
                     </p>
                     <p className="text-[11px] text-slate-400 mt-1">
-                      Facturación (${report.sales.totalRevenue.toLocaleString('es-AR')}) - Costo est. (${report.estimatedResult.estimatedCogs.toLocaleString('es-AR')}) - Gastos (${report.expenses.totalExpensesAmount.toLocaleString('es-AR')})
+                      Facturación (${report.sales.totalRevenue.toLocaleString('es-AR')}) − Costo est. (${report.estimatedResult.estimatedCogs.toLocaleString('es-AR')}) − Gastos (${report.expenses.totalExpensesAmount.toLocaleString('es-AR')})
                     </p>
                   </div>
                 </div>
@@ -907,6 +976,27 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ products, onNavigate }
         <SalesHistoryModal
           isOpen={showSalesHistory}
           onClose={() => setShowSalesHistory(false)}
+          onSaleCancelled={loadReport}
+        />
+      )}
+
+      {/* TRACEABILITY BREAKDOWN MODAL */}
+      {activeTraceability && report && (
+        <ReportTraceabilityModal
+          type={activeTraceability}
+          report={report}
+          onClose={() => setActiveTraceability(null)}
+          onSelectSale={(sId) => setSelectedSaleIdForDetail(sId)}
+          onSelectCustomer={handleOpenCustomerDetail}
+          onSelectPurchase={(pId) => setSelectedPurchaseIdForDetail(pId)}
+        />
+      )}
+
+      {/* SALE DETAIL MODAL */}
+      {selectedSaleIdForDetail && (
+        <SaleDetailModal
+          saleId={selectedSaleIdForDetail}
+          onClose={() => setSelectedSaleIdForDetail(null)}
           onSaleCancelled={loadReport}
         />
       )}

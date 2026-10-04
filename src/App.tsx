@@ -198,6 +198,16 @@ export default function App() {
                 />
               )}
 
+              {currentTab === 'providers' && (
+                <StockPage
+                  products={products}
+                  initialMode="providers"
+                  onProductsUpdated={handleProductsBatchUpdated}
+                  onProductSaved={handleProductSaved}
+                  onBackToHome={() => setCurrentTab('home')}
+                />
+              )}
+
               {/* Legacy fallback routes for search and list */}
               {currentTab === 'search' && (
                 <SearchPage

@@ -17,6 +17,7 @@ import { Purchase, PurchaseItem, ProcessPurchaseInput } from '../../types/purcha
 import { Product, getProductStock, getTotalStock } from '../../types/product';
 import { LocationSelection } from '../../types/location';
 import { productService } from './productService';
+import { providerService } from './providerService';
 import { getArgentinaToday, toArgentinaDateString } from '../../utils/dateUtils';
 
 const PURCHASES_COLLECTION = 'purchases';
@@ -148,6 +149,15 @@ export const purchaseService = {
     }
 
     const operatingDate = getArgentinaToday();
+
+    // Calculate payment status & amounts
+    const rawPaid = input.paidAmount !== undefined ? Math.max(0, input.paidAmount) : totalAmount; // Default to fully paid if not specified
+    const paidAmount = Math.min(totalAmount, rawPaid);
+    const pendingAmount = Math.max(0, totalAmount - paidAmount);
+    const paymentStatus: 'PAID' | 'PENDING' | 'PARTIAL' = 
+      input.paymentStatus || (paidAmount >= totalAmount ? 'PAID' : paidAmount > 0 ? 'PARTIAL' : 'PENDING');
+    const paidFrom = input.paidFrom || (paidAmount > 0 ? 'caja_diaria' : undefined);
+
     const newPurchase: Purchase = {
       id: purchaseId,
       date: operatingDate,
@@ -158,6 +168,10 @@ export const purchaseService = {
       totalItemsCount,
       items: purchaseItems,
       locationId: targetLocationKey,
+      paymentStatus,
+      paidAmount,
+      pendingAmount,
+      paidFrom,
     };
 
     // Firestore batch execution
@@ -166,7 +180,7 @@ export const purchaseService = {
 
       // 1. Add purchase doc
       const purchaseRef = doc(db, PURCHASES_COLLECTION, purchaseId);
-      batch.set(purchaseRef, {
+      const purchasePayload: Record<string, any> = {
         id: newPurchase.id,
         date: operatingDate,
         providerId: newPurchase.providerId,
@@ -177,7 +191,13 @@ export const purchaseService = {
         totalItemsCount: newPurchase.totalItemsCount,
         itemsCount: newPurchase.items.length,
         locationId: targetLocationKey,
-      });
+        paymentStatus,
+        paidAmount,
+        pendingAmount,
+      };
+      if (paidFrom) purchasePayload.paidFrom = paidFrom;
+
+      batch.set(purchaseRef, purchasePayload);
 
       // 2. Add purchase_items docs
       for (const pItem of purchaseItems) {
@@ -249,6 +269,24 @@ export const purchaseService = {
         } catch (err) {
           console.warn(`Failed fallback update for product ${updatedProd.id}:`, err);
         }
+      }
+    }
+
+    // If purchase was paid (fully or partially), record the supplier payment and cash disbursement
+    if (paidAmount > 0) {
+      try {
+        await providerService.registerSupplierPayment({
+          providerId: input.providerId,
+          providerName: input.providerName,
+          purchaseId,
+          amount: paidAmount,
+          date: operatingDate,
+          paidFrom: paidFrom || 'caja_diaria',
+          locationId: targetLocationKey,
+          notes: `Pago inicial compra #${purchaseId.slice(-6)}`,
+        });
+      } catch (err) {
+        console.warn('Error al registrar pago inicial de proveedor:', err);
       }
     }
 
@@ -355,6 +393,11 @@ export const purchaseService = {
         const purLoc = data.locationId || 'aimogasta';
         if (!locationId || locationId === 'all' || purLoc === locationId) {
           const localMatch = localMap.get(docSnap.id);
+          const totalAmount = data.totalAmount || 0;
+          const paidAmount = data.paidAmount !== undefined ? data.paidAmount : (localMatch?.paidAmount !== undefined ? localMatch.paidAmount : 0);
+          const pendingAmount = data.pendingAmount !== undefined ? data.pendingAmount : Math.max(0, totalAmount - paidAmount);
+          const paymentStatus = data.paymentStatus || (paidAmount >= totalAmount ? 'PAID' : paidAmount > 0 ? 'PARTIAL' : 'PENDING');
+
           purchases.push({
             id: docSnap.id,
             date: data.date || toArgentinaDateString(data.createdAt?.toDate ? data.createdAt.toDate() : data.createdAt) || getArgentinaToday(),
@@ -362,12 +405,16 @@ export const purchaseService = {
             providerName: data.providerName || 'Proveedor',
             locationId: purLoc,
             createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : (data.createdAt || new Date().toISOString()),
-            totalAmount: data.totalAmount || 0,
+            totalAmount,
             totalItemsCount: data.totalItemsCount || data.itemsCount || 0,
             items: (localMatch && localMatch.items && localMatch.items.length > 0) ? localMatch.items : (data.items || []),
             status: data.status || undefined,
             cancelledAt: data.cancelledAtIso || (data.cancelledAt?.toDate ? data.cancelledAt.toDate().toISOString() : undefined),
             cancellationReason: data.cancellationReason || undefined,
+            paymentStatus,
+            paidAmount,
+            pendingAmount,
+            paidFrom: data.paidFrom || localMatch?.paidFrom,
           });
         }
       });
@@ -443,18 +490,28 @@ export const purchaseService = {
           });
         });
 
+        const totalAmount = data.totalAmount || 0;
+        const paidAmount = data.paidAmount !== undefined ? data.paidAmount : (foundLocal?.paidAmount !== undefined ? foundLocal.paidAmount : 0);
+        const pendingAmount = data.pendingAmount !== undefined ? data.pendingAmount : Math.max(0, totalAmount - paidAmount);
+        const paymentStatus = data.paymentStatus || (paidAmount >= totalAmount ? 'PAID' : paidAmount > 0 ? 'PARTIAL' : 'PENDING');
+
         const purchase: Purchase = {
           id: docSnap.id,
+          date: data.date,
           providerId: data.providerId || '',
           providerName: data.providerName || 'Proveedor',
           locationId: data.locationId || 'aimogasta',
           createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : (data.createdAt || new Date().toISOString()),
-          totalAmount: data.totalAmount || 0,
+          totalAmount,
           totalItemsCount: data.totalItemsCount || items.reduce((acc, curr) => acc + (curr.quantity || 0), 0),
           items: items.length > 0 ? items : (foundLocal?.items || []),
           status: data.status || undefined,
           cancelledAt: data.cancelledAtIso || (data.cancelledAt?.toDate ? data.cancelledAt.toDate().toISOString() : undefined),
           cancellationReason: data.cancellationReason || undefined,
+          paymentStatus,
+          paidAmount,
+          pendingAmount,
+          paidFrom: data.paidFrom || foundLocal?.paidFrom,
         };
 
         return purchase;

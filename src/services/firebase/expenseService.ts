@@ -56,6 +56,7 @@ export const expenseService = {
     const targetLocationKey = input.locationId || locationId || 'aimogasta';
     const nowIso = new Date().toISOString();
     const expenseId = `exp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const paidFrom = input.paidFrom || (input.paymentMethod === 'mercado_pago' ? 'mercado_pago' : input.paymentMethod === 'transfer' ? 'transfer' : 'caja_diaria');
 
     const newExpense: Expense = {
       id: expenseId,
@@ -64,6 +65,7 @@ export const expenseService = {
       amount: input.amount,
       date: input.date || getArgentinaToday(),
       paymentMethod: input.paymentMethod || 'cash',
+      paidFrom,
       locationId: targetLocationKey,
       notes: input.notes?.trim() || '',
       recurrent: Boolean(input.recurrent),
@@ -80,6 +82,7 @@ export const expenseService = {
         amount: newExpense.amount,
         date: newExpense.date,
         paymentMethod: newExpense.paymentMethod,
+        paidFrom: newExpense.paidFrom,
         locationId: targetLocationKey,
         notes: newExpense.notes,
         recurrent: newExpense.recurrent,
@@ -128,6 +131,7 @@ export const expenseService = {
             amount: data.amount || 0,
             date: dateStr || getArgentinaToday(),
             paymentMethod: data.paymentMethod || 'cash',
+            paidFrom: data.paidFrom || (data.paymentMethod === 'mercado_pago' ? 'mercado_pago' : data.paymentMethod === 'transfer' ? 'transfer' : 'caja_diaria'),
             locationId: expLocation,
             notes: data.notes || '',
             recurrent: Boolean(data.recurrent),
@@ -188,6 +192,7 @@ export const expenseService = {
       if (updates.amount !== undefined) fsUpdates.amount = updates.amount;
       if (updates.date !== undefined) fsUpdates.date = updates.date;
       if (updates.paymentMethod !== undefined) fsUpdates.paymentMethod = updates.paymentMethod;
+      if (updates.paidFrom !== undefined) fsUpdates.paidFrom = updates.paidFrom;
       if (updates.notes !== undefined) fsUpdates.notes = updates.notes.trim();
       if (updates.recurrent !== undefined) fsUpdates.recurrent = updates.recurrent;
 
@@ -431,6 +436,7 @@ export const expenseService = {
           amount: data.amount || 0,
           date: dateStr || getArgentinaToday(),
           paymentMethod: data.paymentMethod || 'cash',
+          paidFrom: data.paidFrom || (data.paymentMethod === 'mercado_pago' ? 'mercado_pago' : data.paymentMethod === 'transfer' ? 'transfer' : 'caja_diaria'),
           locationId: data.locationId || 'aimogasta',
           notes: data.notes || '',
           recurrent: Boolean(data.recurrent),

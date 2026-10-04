@@ -3,8 +3,10 @@ import {
   Expense, 
   ExpenseCategory, 
   ExpensePaymentMethod, 
+  ExpensePaidFrom,
   EXPENSE_CATEGORIES, 
   EXPENSE_PAYMENT_METHODS, 
+  EXPENSE_PAID_FROM_OPTIONS,
   CreateExpenseInput 
 } from '../types/expense';
 import { expenseService } from '../services/firebase/expenseService';
@@ -59,6 +61,7 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onBackToHome, isEmbe
   const [formAmount, setFormAmount] = useState<number>(0);
   const [formDate, setFormDate] = useState<string>(getArgentinaToday());
   const [formPaymentMethod, setFormPaymentMethod] = useState<ExpensePaymentMethod>('cash');
+  const [formPaidFrom, setFormPaidFrom] = useState<ExpensePaidFrom>('caja_diaria');
   const [formNotes, setFormNotes] = useState<string>('');
   const [formRecurrent, setFormRecurrent] = useState<boolean>(false);
 
@@ -144,6 +147,7 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onBackToHome, isEmbe
     setFormAmount(0);
     setFormDate(getArgentinaToday());
     setFormPaymentMethod('cash');
+    setFormPaidFrom('caja_diaria');
     setFormNotes('');
     setFormRecurrent(false);
     setFormError(null);
@@ -157,6 +161,7 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onBackToHome, isEmbe
     setFormAmount(exp.amount);
     setFormDate(exp.date);
     setFormPaymentMethod(exp.paymentMethod);
+    setFormPaidFrom(exp.paidFrom || (exp.paymentMethod === 'mercado_pago' ? 'mercado_pago' : exp.paymentMethod === 'transfer' ? 'transfer' : 'caja_diaria'));
     setFormNotes(exp.notes || '');
     setFormRecurrent(exp.recurrent);
     setFormError(null);
@@ -179,12 +184,15 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onBackToHome, isEmbe
     setIsSubmitting(true);
 
     try {
+      const pm: ExpensePaymentMethod = formPaidFrom === 'mercado_pago' ? 'mercado_pago' : formPaidFrom === 'transfer' ? 'transfer' : 'cash';
+
       const inputData: CreateExpenseInput = {
         category: formCategory,
         description: formDescription.trim(),
         amount: formAmount,
         date: formDate,
-        paymentMethod: formPaymentMethod,
+        paymentMethod: pm,
+        paidFrom: formPaidFrom,
         notes: formNotes.trim(),
         recurrent: formRecurrent,
       };
@@ -597,22 +605,31 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onBackToHome, isEmbe
                   />
                 </div>
 
-                {/* Forma de pago */}
+                {/* Origen de los fondos / Caja */}
                 <div className="space-y-1">
                   <label className="block text-xs font-bold text-slate-700">
-                    Forma de pago *
+                    Origen de los Fondos *
                   </label>
                   <select
-                    value={formPaymentMethod}
-                    onChange={(e) => setFormPaymentMethod(e.target.value as ExpensePaymentMethod)}
+                    value={formPaidFrom}
+                    onChange={(e) => {
+                      const val = e.target.value as ExpensePaidFrom;
+                      setFormPaidFrom(val);
+                      if (val === 'mercado_pago') setFormPaymentMethod('mercado_pago');
+                      else if (val === 'transfer') setFormPaymentMethod('transfer');
+                      else setFormPaymentMethod('cash');
+                    }}
                     className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-2xl text-xs font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-rose-500 outline-none"
                   >
-                    {EXPENSE_PAYMENT_METHODS.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.label}
+                    {EXPENSE_PAID_FROM_OPTIONS.map((opt) => (
+                      <option key={opt.id} value={opt.id}>
+                        {opt.label}
                       </option>
                     ))}
                   </select>
+                  <p className="text-[10px] text-slate-400 font-medium">
+                    {EXPENSE_PAID_FROM_OPTIONS.find((o) => o.id === formPaidFrom)?.desc}
+                  </p>
                 </div>
               </div>
 

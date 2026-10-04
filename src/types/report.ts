@@ -151,6 +151,38 @@ export interface EstimatedResultSummary {
   hasIncompleteCostData: boolean;
 }
 
+export interface SoldProductCostDetail {
+  productId: string;
+  name: string;
+  brand?: string;
+  presentation?: string;
+  quantitySold: number;
+  unitCost: number;
+  totalCost: number;
+  revenue: number;
+  hasCost: boolean;
+}
+
+export interface CollectedPaymentDetail {
+  id: string;
+  type: 'sale' | 'customer_payment';
+  description: string;
+  amount: number;
+  paymentMethod: string;
+  date: string;
+  referenceId?: string;
+}
+
+export interface ReportTraceabilityData {
+  sales: any[];
+  collectedMovements: CollectedPaymentDetail[];
+  creditSales: any[];
+  debtors: TopDebtor[];
+  purchases: any[];
+  expenses: any[];
+  soldProductsWithCost: SoldProductCostDetail[];
+}
+
 export interface FullBusinessReport {
   filter: ReportFilter;
   dateRangeLabel: string;
@@ -165,4 +197,5 @@ export interface FullBusinessReport {
   inventory: InventoryReportSummary;
   alerts: ReportAlert[];
   locationComparison?: LocationComparisonStat[];
+  traceability?: ReportTraceabilityData;
 }

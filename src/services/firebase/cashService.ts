@@ -332,6 +332,9 @@ export const cashService = {
           status: exp.status || undefined,
           cancelledAt: exp.cancelledAt || undefined,
           cancellationReason: exp.cancellationReason || undefined,
+          paidFrom: exp.paidFrom || (exp.paymentMethod === 'cash' ? 'caja_diaria' : exp.paymentMethod),
+          cashRegisterType: exp.paidFrom === 'caja_general' ? 'caja_general' : (exp.paidFrom === 'caja_diaria' || exp.paymentMethod === 'cash') ? 'caja_diaria' : undefined,
+          expenseId: exp.id,
         };
         movementMap.set(synthMov.id, synthMov);
       }
@@ -362,11 +365,54 @@ export const cashService = {
           status: accMov.status || undefined,
           cancelledAt: accMov.cancelledAt || undefined,
           cancellationReason: accMov.cancellationReason || undefined,
+          paidFrom: (accMov as any).paymentMethod === 'mercado_pago' ? 'mercado_pago' : (accMov as any).paymentMethod === 'transfer' ? 'transfer' : 'caja_diaria',
+          cashRegisterType: (accMov as any).paymentMethod === 'cash' || !(accMov as any).paymentMethod ? 'caja_diaria' : undefined,
+          customerId: accMov.customerId,
         };
         movementMap.set(synthMov.id, synthMov);
       }
     } catch (err) {
       console.warn('Error al consolidar pagos de clientes en caja:', err);
+    }
+
+    // 5. Consolidate Supplier Payments from supplier_payments collection if not already recorded
+    try {
+      const spSnap = await getDocs(query(collection(db, 'supplier_payments'), orderBy('createdAt', 'desc')));
+      spSnap.forEach(d => {
+        const data = d.data();
+        const sLoc = data.locationId || 'aimogasta';
+        if (locationId && locationId !== 'all' && sLoc !== locationId) return;
+
+        const synthId = `mov_cash_spay_${d.id}`;
+        if (movementMap.has(synthId) || movementMap.has(`mov_cash_supplier_payment_${d.id}`)) return;
+
+        const pm = data.paidFrom === 'mercado_pago' ? 'mercado_pago' : data.paidFrom === 'transfer' ? 'transfer' : 'cash';
+        const crType = data.paidFrom === 'caja_general' ? 'caja_general' : data.paidFrom === 'caja_diaria' ? 'caja_diaria' : undefined;
+
+        movementMap.set(synthId, {
+          id: synthId,
+          type: 'EXPENSE',
+          amount: data.amount || 0,
+          paymentMethod: pm,
+          description: `Pago a proveedor: ${data.providerName || 'Proveedor'}`,
+          date: data.date || getArgentinaToday(),
+          sourceType: 'SUPPLIER_PAYMENT',
+          sourceId: d.id,
+          locationId: sLoc,
+          notes: data.notes || '',
+          createdAt: data.createdAtIso || new Date().toISOString(),
+          status: data.status || undefined,
+          cancelledAt: data.cancelledAtIso || undefined,
+          cancellationReason: data.cancellationReason || undefined,
+          paidFrom: data.paidFrom,
+          cashRegisterType: crType,
+          providerId: data.providerId,
+          providerName: data.providerName,
+          purchaseId: data.purchaseId,
+        });
+      });
+    } catch (err) {
+      console.warn('Error al consolidar pagos a proveedores en caja:', err);
     }
 
     // Combine manual movements with consolidated map
@@ -404,10 +450,14 @@ export const cashService = {
   },
 
   /**
-   * Calculate current balances by payment method (Cash, Mercado Pago, Transfer) & Today's Summary.
+   * Calculate current balances by payment method, Caja Diaria (physical drawer starting at $0 today),
+   * Caja General (accumulative business reserve), & Today's Summary.
    */
   async getCashSummary(locationId?: LocationSelection): Promise<CashBalanceSummary> {
-    const movements = await this.getCashMovements(locationId);
+    const [movements, closures] = await Promise.all([
+      this.getCashMovements(locationId),
+      this.getCashClosures(locationId).catch(() => [])
+    ]);
 
     const todayStr = getArgentinaToday();
 
@@ -424,18 +474,59 @@ export const cashService = {
     let todayIncome = 0;
     let todayExpense = 0;
 
-    for (const mov of movements) {
-      if (mov.status === 'CANCELLED') continue; // Exclude cancelled movements from cash balances and totals
+    // CAJA DIARIA: strictly physical cash in drawer, starts at $0 today!
+    let dailyCashIncome = 0;
+    let dailyCashExpense = 0;
+    let dailyTransfersToGeneral = 0;
 
-      // CRITICAL: Fiado / credit sales do NOT generate cash flow or affect financial balances!
-      if (mov.paymentMethod === 'credit') {
-        continue;
-      }
+    // CAJA GENERAL: accumulative reserve across time
+    let cajaGeneralBalance = 0;
+    let cajaGeneralTotalIn = 0;
+    let cajaGeneralTotalOut = 0;
+
+    for (const mov of movements) {
+      if (mov.status === 'CANCELLED') continue; // Exclude cancelled movements
 
       const isIncome = mov.type === 'INCOME';
       const val = isIncome ? mov.amount : -mov.amount;
 
-      // Accumulate totals by payment method (historical accumulated balances)
+      // 1. Internal Transfers (Caja Diaria -> Caja General)
+      if (mov.sourceType === 'INTERNAL_TRANSFER') {
+        if (mov.destinationFund === 'caja_general' || mov.cashRegisterType === 'caja_general') {
+          cajaGeneralBalance += mov.amount;
+          cajaGeneralTotalIn += mov.amount;
+        }
+        if (mov.date === todayStr && (mov.originFund === 'caja_diaria' || !mov.originFund || mov.description.includes('recaudación') || mov.description.includes('Caja Diaria'))) {
+          dailyTransfersToGeneral += mov.amount;
+        }
+        continue;
+      }
+
+      // 2. Movements originating directly from Caja General
+      if (mov.cashRegisterType === 'caja_general' || mov.paidFrom === 'caja_general') {
+        if (isIncome) {
+          cajaGeneralBalance += mov.amount;
+          cajaGeneralTotalIn += mov.amount;
+        } else {
+          cajaGeneralBalance -= mov.amount;
+          cajaGeneralTotalOut += mov.amount;
+        }
+
+        // Tracking commercial today's activity if happened today
+        if (mov.date === todayStr) {
+          if (isIncome) todayIncome += mov.amount;
+          else todayExpense += mov.amount;
+        }
+        continue;
+      }
+
+      // 3. Skip pure credit / fiado sales (they do not affect physical or digital money until collected)
+      if (mov.paymentMethod === 'credit') {
+        continue;
+      }
+
+      // 4. Standard / Daily Register / Digital funds:
+      // Accumulated balances
       if (mov.paymentMethod === 'cash') {
         cashBalance += val;
       } else if (mov.paymentMethod === 'mercado_pago') {
@@ -446,7 +537,7 @@ export const cashService = {
         otherBalance += val;
       }
 
-      // Today's summary (strictly cash flow: dinero efectivamente ingresado / egresado)
+      // Today's summary
       if (mov.date === todayStr) {
         if (isIncome) {
           todayIncome += mov.amount;
@@ -456,6 +547,12 @@ export const cashService = {
 
         if (mov.paymentMethod === 'cash') {
           todayCash += val;
+          // PHYSICAL CAJA DIARIA:
+          if (isIncome) {
+            dailyCashIncome += mov.amount;
+          } else {
+            dailyCashExpense += mov.amount;
+          }
         } else if (mov.paymentMethod === 'mercado_pago') {
           todayMercadoPago += val;
         } else if (mov.paymentMethod === 'transfer') {
@@ -465,6 +562,13 @@ export const cashService = {
         }
       }
     }
+
+    // Daily Expected Cash physically in drawer
+    const dailyExpectedCash = dailyCashIncome - dailyCashExpense - dailyTransfersToGeneral;
+
+    // Find last closure for today and location
+    const todayClosures = closures.filter(c => c.date === todayStr && c.status !== 'CANCELLED');
+    const lastClosure = todayClosures.length > 0 ? todayClosures[0] : (closures.length > 0 ? closures[0] : null);
 
     // Calculate today's commercial sales (cash + MP + transfer + fiado)
     let todaySales = 0;
@@ -486,7 +590,7 @@ export const cashService = {
       mercadoPagoBalance,
       transferBalance,
       otherBalance,
-      totalBalance: cashBalance + mercadoPagoBalance + transferBalance + otherBalance,
+      totalBalance: cashBalance + mercadoPagoBalance + transferBalance + otherBalance + cajaGeneralBalance,
       todayIncome,
       todayExpense,
       todayNet: todayIncome - todayExpense,
@@ -495,7 +599,145 @@ export const cashService = {
       todayMercadoPago,
       todayTransfer,
       todayOther,
+      dailyExpectedCash,
+      dailyCashIncome,
+      dailyCashExpense,
+      dailyTransfersToGeneral,
+      lastClosure,
+      cajaGeneralBalance,
+      cajaGeneralTotalIn,
+      cajaGeneralTotalOut,
     };
+  },
+
+  /**
+   * Explicitly transfer collected cash from Caja Diaria to Caja General:
+   * Generates a single internal transfer movement (reduces Caja Diaria, increases Caja General).
+   * NO artificial operational income/expense is generated!
+   */
+  async transferToCajaGeneral(
+    amount: number, 
+    notes?: string, 
+    locationId: string = 'aimogasta'
+  ): Promise<CashMovement> {
+    if (!amount || amount <= 0 || isNaN(amount)) {
+      throw new Error('El importe a retirar debe ser mayor a cero.');
+    }
+
+    const todayStr = getArgentinaToday();
+    const nowIso = new Date().toISOString();
+    const movId = `mov_trans_gen_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+    const newMov: CashMovement = {
+      id: movId,
+      type: 'EXPENSE',
+      amount,
+      paymentMethod: 'cash',
+      description: 'Pase de recaudación a Caja General',
+      date: todayStr,
+      sourceType: 'INTERNAL_TRANSFER',
+      sourceId: movId,
+      locationId,
+      originFund: 'caja_diaria',
+      destinationFund: 'caja_general',
+      cashRegisterType: 'caja_general',
+      notes: notes?.trim() || 'Retiro de recaudación diaria hacia Caja General',
+      createdAt: nowIso,
+    };
+
+    try {
+      const ref = doc(db, CASH_MOVEMENTS_COLLECTION, movId);
+      await setDoc(ref, {
+        id: newMov.id,
+        type: newMov.type,
+        amount: newMov.amount,
+        paymentMethod: newMov.paymentMethod,
+        description: newMov.description,
+        date: newMov.date,
+        sourceType: newMov.sourceType,
+        sourceId: newMov.sourceId,
+        locationId,
+        originFund: newMov.originFund,
+        destinationFund: newMov.destinationFund,
+        cashRegisterType: newMov.cashRegisterType,
+        notes: newMov.notes,
+        createdAtIso: nowIso,
+        createdAt: serverTimestamp(),
+      });
+    } catch (err) {
+      console.warn('Error saving transfer to Caja General in Firestore:', err);
+    }
+
+    const local = getLocalCashMovements();
+    local.unshift(newMov);
+    saveLocalCashMovements(local);
+
+    return newMov;
+  },
+
+  /**
+   * Register a direct financial movement inside Caja General (e.g. withdrawal, manual expense, deposit)
+   */
+  async createGeneralCashMovement(input: {
+    type: 'INCOME' | 'EXPENSE';
+    amount: number;
+    description: string;
+    notes?: string;
+    locationId?: string;
+  }): Promise<CashMovement> {
+    if (!input.description?.trim()) throw new Error('Debe ingresar un concepto para el movimiento.');
+    if (!input.amount || input.amount <= 0 || isNaN(input.amount)) throw new Error('El importe debe ser mayor a cero.');
+
+    const locId = input.locationId || 'aimogasta';
+    const nowIso = new Date().toISOString();
+    const todayStr = getArgentinaToday();
+    const movId = `mov_gen_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+    const newMov: CashMovement = {
+      id: movId,
+      type: input.type,
+      amount: input.amount,
+      paymentMethod: 'cash',
+      description: input.description.trim(),
+      date: todayStr,
+      sourceType: 'MANUAL',
+      sourceId: movId,
+      locationId: locId,
+      cashRegisterType: 'caja_general',
+      originFund: 'caja_general',
+      paidFrom: 'caja_general',
+      notes: input.notes?.trim() || 'Movimiento directo en Caja General',
+      createdAt: nowIso,
+    };
+
+    try {
+      const ref = doc(db, CASH_MOVEMENTS_COLLECTION, movId);
+      await setDoc(ref, {
+        id: newMov.id,
+        type: newMov.type,
+        amount: newMov.amount,
+        paymentMethod: newMov.paymentMethod,
+        description: newMov.description,
+        date: newMov.date,
+        sourceType: newMov.sourceType,
+        sourceId: newMov.sourceId,
+        locationId: locId,
+        cashRegisterType: newMov.cashRegisterType,
+        originFund: newMov.originFund,
+        paidFrom: newMov.paidFrom,
+        notes: newMov.notes,
+        createdAtIso: nowIso,
+        createdAt: serverTimestamp(),
+      });
+    } catch (err) {
+      console.warn('Error saving general cash movement:', err);
+    }
+
+    const local = getLocalCashMovements();
+    local.unshift(newMov);
+    saveLocalCashMovements(local);
+
+    return newMov;
   },
 
   /**

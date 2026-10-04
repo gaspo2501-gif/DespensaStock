@@ -76,7 +76,7 @@ export interface ExternalProductResult {
   error?: string;
 }
 
-export type NavigationTab = 'home' | 'scan' | 'search' | 'list' | 'sales' | 'customers' | 'stock' | 'expenses' | 'cash' | 'reports';
+export type NavigationTab = 'home' | 'scan' | 'search' | 'list' | 'sales' | 'customers' | 'stock' | 'expenses' | 'cash' | 'reports' | 'providers';
 
 // Extensibility interfaces for future versions (V2 Stock, V3 Sales, V4 Suppliers, V5 Metrics)
 export interface StockMovement {

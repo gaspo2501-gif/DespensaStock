@@ -14,6 +14,7 @@ import { SaleDetailModal } from '../components/modals/SaleDetailModal';
 import { ExpenseDetailModal } from '../components/modals/ExpenseDetailModal';
 import { PaymentDetailModal } from '../components/modals/PaymentDetailModal';
 import { useLocation } from '../context/LocationContext';
+import { getLocationName } from '../types/location';
 import { 
   formatLocalDate, 
   formatLocalDateTime,
@@ -109,6 +110,7 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
   const [movDescription, setMovDescription] = useState<string>('');
   const [movAmountStr, setMovAmountStr] = useState<string>('');
   const [movMethod, setMovMethod] = useState<CashPaymentMethod>('cash');
+  const [movFund, setMovFund] = useState<'caja_diaria' | 'caja_general' | 'mercado_pago' | 'transfer'>('caja_diaria');
   const [movDate, setMovDate] = useState<string>(getArgentinaToday());
   const [movNotes, setMovNotes] = useState<string>('');
   const [isSubmittingMov, setIsSubmittingMov] = useState<boolean>(false);
@@ -162,16 +164,22 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
 
     setIsSubmittingMov(true);
     try {
+      const pm: CashPaymentMethod = movFund === 'mercado_pago' ? 'mercado_pago' : movFund === 'transfer' ? 'transfer' : 'cash';
+      const crType = movFund === 'caja_general' ? 'caja_general' : movFund === 'caja_diaria' ? 'caja_diaria' : undefined;
+
       await cashService.createCashMovement({
         type: movType,
         amount,
-        paymentMethod: movMethod,
+        paymentMethod: pm,
         description: movDescription.trim(),
         date: movDate,
         sourceType: 'MANUAL',
         sourceId: `manual_${Date.now()}`,
         notes: movNotes.trim(),
-      });
+        cashRegisterType: crType,
+        paidFrom: movFund,
+        locationId: currentLocation,
+      }, currentLocation);
 
       setFeedback({ type: 'success', message: `Movimiento de $${amount.toLocaleString('es-AR')} registrado con éxito.` });
       setShowManualModal(false);
@@ -179,6 +187,7 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
       setMovDescription('');
       setMovAmountStr('');
       setMovNotes('');
+      setMovFund('caja_diaria');
       await loadData();
     } catch (err: any) {
       setFeedback({ type: 'error', message: err.message || 'Error al registrar el movimiento.' });
@@ -211,6 +220,20 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
     }
   };
 
+  // Form states for transfer to Caja General
+  const [showTransferToGeneralModal, setShowTransferToGeneralModal] = useState<boolean>(false);
+  const [transferAmountStr, setTransferAmountStr] = useState<string>('');
+  const [transferNotes, setTransferNotes] = useState<string>('');
+  const [isSubmittingTransfer, setIsSubmittingTransfer] = useState<boolean>(false);
+
+  // Form states for general cash movement
+  const [showGeneralMovementModal, setShowGeneralMovementModal] = useState<boolean>(false);
+  const [generalMovType, setGeneralMovType] = useState<CashMovementType>('INCOME');
+  const [generalMovDesc, setGeneralMovDesc] = useState<string>('');
+  const [generalMovAmountStr, setGeneralMovAmountStr] = useState<string>('');
+  const [generalMovNotes, setGeneralMovNotes] = useState<string>('');
+  const [isSubmittingGeneralMov, setIsSubmittingGeneralMov] = useState<boolean>(false);
+
   // Handle save cash closure
   const handleSaveClosure = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -220,9 +243,11 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
       return;
     }
 
+    const expectedCash = summary.dailyExpectedCash !== undefined ? summary.dailyExpectedCash : summary.cashBalance;
+
     setIsSubmittingClosure(true);
     try {
-      const closure = await cashService.createCashClosure(summary.cashBalance, countedCash, closureNotes.trim());
+      const closure = await cashService.createCashClosure(expectedCash, countedCash, closureNotes.trim(), currentLocation);
       const diffText = closure.difference === 0 
         ? 'Caja exacta' 
         : closure.difference > 0 
@@ -238,6 +263,65 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
       setFeedback({ type: 'error', message: err.message || 'Error al guardar el cierre de caja.' });
     } finally {
       setIsSubmittingClosure(false);
+    }
+  };
+
+  // Handle transfer to Caja General
+  const handleSaveTransferToGeneral = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const amount = parseFloat(transferAmountStr);
+    if (isNaN(amount) || amount <= 0) {
+      setFeedback({ type: 'error', message: 'Ingresá un importe válido mayor a $0.' });
+      return;
+    }
+
+    setIsSubmittingTransfer(true);
+    try {
+      await cashService.transferToCajaGeneral(amount, transferNotes.trim(), currentLocation);
+      setFeedback({ type: 'success', message: `Pase de $${amount.toLocaleString('es-AR')} a Caja General realizado con éxito.` });
+      setShowTransferToGeneralModal(false);
+      setTransferAmountStr('');
+      setTransferNotes('');
+      await loadData();
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err.message || 'Error al transferir a Caja General.' });
+    } finally {
+      setIsSubmittingTransfer(false);
+    }
+  };
+
+  // Handle direct movement in Caja General
+  const handleSaveGeneralMovement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const amount = parseFloat(generalMovAmountStr);
+    if (!generalMovDesc.trim()) {
+      setFeedback({ type: 'error', message: 'Ingresá un concepto para el movimiento.' });
+      return;
+    }
+    if (isNaN(amount) || amount <= 0) {
+      setFeedback({ type: 'error', message: 'Ingresá un importe mayor a $0.' });
+      return;
+    }
+
+    setIsSubmittingGeneralMov(true);
+    try {
+      await cashService.createGeneralCashMovement({
+        type: generalMovType,
+        amount,
+        description: generalMovDesc.trim(),
+        notes: generalMovNotes.trim(),
+        locationId: currentLocation,
+      });
+      setFeedback({ type: 'success', message: `Movimiento de Caja General ($${amount.toLocaleString('es-AR')}) registrado con éxito.` });
+      setShowGeneralMovementModal(false);
+      setGeneralMovDesc('');
+      setGeneralMovAmountStr('');
+      setGeneralMovNotes('');
+      await loadData();
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err.message || 'Error al registrar movimiento en Caja General.' });
+    } finally {
+      setIsSubmittingGeneralMov(false);
     }
   };
 
@@ -354,13 +438,14 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
 
           <button
             onClick={() => {
-              setCountedCashStr(summary.cashBalance.toString());
+              const expected = summary.dailyExpectedCash !== undefined ? summary.dailyExpectedCash : summary.cashBalance;
+              setCountedCashStr(expected.toString());
               setShowClosureModal(true);
             }}
             className="px-3.5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-2xl shadow-md transition-all flex items-center gap-1.5"
           >
             <Lock className="w-3.5 h-3.5" />
-            <span>Cerrar Caja</span>
+            <span>Cerrar Caja Diaria</span>
           </button>
 
           <button
@@ -495,7 +580,12 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
                       title="Hacé clic para ver el arqueo detallado"
                     >
                       <div className="flex items-center justify-between border-b border-slate-200/80 pb-2">
-                        <span className="text-xs font-bold text-slate-700 group-hover:text-indigo-700 font-mono transition-colors">{dateFormatted}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-slate-700 group-hover:text-indigo-700 font-mono transition-colors">{dateFormatted}</span>
+                          <span className="text-[10px] font-bold text-slate-600 bg-slate-200/70 px-2 py-0.5 rounded-md">
+                            {getLocationName(c.locationId as any || 'aimogasta')}
+                          </span>
+                        </div>
                         {c.status === 'CANCELLED' ? (
                           <span className="text-[10px] font-extrabold text-rose-700 bg-rose-100/80 px-2 py-0.5 rounded-md">
                             ANULADO
@@ -550,8 +640,163 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
       {activeSubTab === 'movements' && (
         <div className="space-y-6 animate-fadeIn">
 
-      {/* Main Balances Grid (Balance del Día) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+          {/* ========================================================================= */}
+          {/* SECCIÓN PRINCIPAL: CAJA DIARIA vs CAJA GENERAL                            */}
+          {/* ========================================================================= */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* 1. CAJA DIARIA DEL LOCAL */}
+            <div className="p-5 bg-gradient-to-br from-emerald-900 to-slate-900 text-white rounded-3xl shadow-lg border border-emerald-700/50 flex flex-col justify-between space-y-4 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl -mr-10 -mt-10 pointer-events-none" />
+              
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
+                      <DollarSign className="w-5 h-5 stroke-[2.5]" />
+                    </div>
+                    <div>
+                      <h2 className="text-sm font-black uppercase tracking-wider text-emerald-300">
+                        Caja Diaria (Local)
+                      </h2>
+                      <p className="text-[11px] text-slate-300">
+                        Dinero físico en cajón • Inicia en $0 cada día
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-extrabold px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 uppercase tracking-wider">
+                    Físico Hoy
+                  </span>
+                </div>
+
+                <div className="p-4 bg-white/10 rounded-2xl border border-white/10 backdrop-blur-xs space-y-1">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-300 block">
+                    Efectivo Esperado en Caja Hoy
+                  </span>
+                  <p className="text-3xl font-black font-mono text-emerald-300 tracking-tight">
+                    ${(summary.dailyExpectedCash || 0).toLocaleString('es-AR')}
+                  </p>
+                  <p className="text-[11px] text-slate-300">
+                    ¿Cuánto efectivo debería haber físicamente ahora en el cajón?
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                  <div className="p-2.5 bg-black/20 rounded-xl border border-white/5 space-y-0.5">
+                    <span className="text-[10px] text-slate-400 font-bold block">Ingresos Efectivo</span>
+                    <span className="font-mono font-bold text-emerald-400">+${(summary.dailyCashIncome || 0).toLocaleString('es-AR')}</span>
+                  </div>
+                  <div className="p-2.5 bg-black/20 rounded-xl border border-white/5 space-y-0.5">
+                    <span className="text-[10px] text-slate-400 font-bold block">Egresos Efectivo</span>
+                    <span className="font-mono font-bold text-rose-400">-${(summary.dailyCashExpense || 0).toLocaleString('es-AR')}</span>
+                  </div>
+                  <div className="p-2.5 bg-black/20 rounded-xl border border-white/5 space-y-0.5">
+                    <span className="text-[10px] text-slate-400 font-bold block">Pases a C. Gral</span>
+                    <span className="font-mono font-bold text-amber-300">-${(summary.dailyTransfersToGeneral || 0).toLocaleString('es-AR')}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-2 flex flex-wrap items-center gap-2 border-t border-white/10">
+                <button
+                  onClick={() => {
+                    const expected = summary.dailyExpectedCash !== undefined ? summary.dailyExpectedCash : summary.cashBalance;
+                    setCountedCashStr(expected.toString());
+                    setShowClosureModal(true);
+                  }}
+                  className="flex-1 py-2.5 px-3 bg-emerald-500 hover:bg-emerald-400 active:scale-98 text-slate-950 font-black text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5"
+                >
+                  <Lock className="w-3.5 h-3.5 stroke-[2.5]" />
+                  <span>Cerrar Caja Diaria (Arqueo)</span>
+                </button>
+                <button
+                  onClick={() => setShowTransferToGeneralModal(true)}
+                  className="py-2.5 px-3 bg-white/15 hover:bg-white/25 active:scale-98 text-white font-bold text-xs rounded-xl transition-all border border-white/20 flex items-center justify-center gap-1.5 shrink-0"
+                  title="Pasar recaudación del día a la Caja General"
+                >
+                  <ArrowUpRight className="w-3.5 h-3.5 text-emerald-300" />
+                  <span>Retirar a Caja General</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 2. CAJA GENERAL (ACUMULATIVA) */}
+            <div className="p-5 bg-white border border-slate-200 rounded-3xl shadow-sm flex flex-col justify-between space-y-4">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-200">
+                      <Building2 className="w-5 h-5 stroke-[2.2]" />
+                    </div>
+                    <div>
+                      <h2 className="text-sm font-black uppercase tracking-wider text-slate-900">
+                        Caja General
+                      </h2>
+                      <p className="text-[11px] text-slate-500">
+                        Recaudación general acumulativa y reservas
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-extrabold px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 uppercase tracking-wider">
+                    Acumulado
+                  </span>
+                </div>
+
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/90 space-y-1">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block">
+                    Total Disponible (Todos los fondos)
+                  </span>
+                  <p className="text-3xl font-black font-mono text-slate-900 tracking-tight">
+                    ${(summary.totalBalance || 0).toLocaleString('es-AR')}
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    Suma consolidada de efectivo general, cuentas digitales y bancos
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+                  <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 space-y-0.5">
+                    <span className="text-[9px] uppercase font-extrabold text-slate-400 block">Efectivo General</span>
+                    <span className="font-mono font-black text-slate-900 block text-xs truncate">
+                      ${(summary.cajaGeneralBalance || 0).toLocaleString('es-AR')}
+                    </span>
+                    <span className="text-[9px] text-slate-400">Fondos / Caja fuerte</span>
+                  </div>
+
+                  <div className="p-2.5 bg-sky-50/60 rounded-xl border border-sky-100 space-y-0.5">
+                    <span className="text-[9px] uppercase font-extrabold text-sky-700 block">Mercado Pago</span>
+                    <span className="font-mono font-black text-sky-800 block text-xs truncate">
+                      ${(summary.mercadoPagoBalance || 0).toLocaleString('es-AR')}
+                    </span>
+                    <span className="text-[9px] text-sky-600/80">Saldo disponible MP</span>
+                  </div>
+
+                  <div className="p-2.5 bg-indigo-50/60 rounded-xl border border-indigo-100 space-y-0.5 col-span-2 sm:col-span-1">
+                    <span className="text-[9px] uppercase font-extrabold text-indigo-700 block">Transferencias / Bancos</span>
+                    <span className="font-mono font-black text-indigo-800 block text-xs truncate">
+                      ${(summary.transferBalance || 0).toLocaleString('es-AR')}
+                    </span>
+                    <span className="text-[9px] text-indigo-600/80">Cuentas bancarias</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-2 flex items-center justify-between gap-2 border-t border-slate-100">
+                <span className="text-[11px] text-slate-400">
+                  Retiros de ganancias y movimientos de fondos
+                </span>
+                <button
+                  onClick={() => setShowGeneralMovementModal(true)}
+                  className="py-2.5 px-3 bg-slate-900 hover:bg-slate-800 active:scale-98 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 shrink-0"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>+ Movimiento Caja General</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Main Balances Grid (Balance del Día) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
         {/* Efectivo Hoy */}
         <div className="p-4 bg-white border border-slate-200 rounded-3xl shadow-2xs space-y-2 relative overflow-hidden group hover:border-emerald-300 transition-colors">
           <div className="flex items-center justify-between">
@@ -989,21 +1234,34 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
                 </div>
               </div>
 
-              {/* Forma de Pago */}
+              {/* Origen / Destino de los Fondos */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                  Forma de Pago <span className="text-rose-500">*</span>
+                  Origen / Destino del Dinero <span className="text-rose-500">*</span>
                 </label>
                 <select
-                  value={movMethod}
-                  onChange={(e) => setMovMethod(e.target.value as CashPaymentMethod)}
+                  value={movFund}
+                  onChange={(e) => {
+                    const f = e.target.value as 'caja_diaria' | 'caja_general' | 'mercado_pago' | 'transfer';
+                    setMovFund(f);
+                    if (f === 'mercado_pago') setMovMethod('mercado_pago');
+                    else if (f === 'transfer') setMovMethod('transfer');
+                    else setMovMethod('cash');
+                  }}
                   className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
                 >
-                  <option value="cash">Efectivo</option>
-                  <option value="mercado_pago">Mercado Pago</option>
-                  <option value="transfer">Transferencia</option>
-                  <option value="other">Otro</option>
+                  <option value="caja_diaria">Caja Diaria (efectivo del cajón de hoy)</option>
+                  <option value="caja_general">Caja General (efectivo acumulado / reservas)</option>
+                  <option value="mercado_pago">Mercado Pago (cuenta digital)</option>
+                  <option value="transfer">Transferencia / Banco</option>
                 </select>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  {movFund === 'caja_diaria'
+                    ? 'Afecta el efectivo físico diario del cajón de hoy.'
+                    : movFund === 'caja_general'
+                    ? 'Afecta la reserva acumulativa general de la empresa.'
+                    : 'Afecta la cuenta digital o bancaria seleccionada.'}
+                </p>
               </div>
 
               {/* Fecha */}
@@ -1192,76 +1450,80 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
 
             <form onSubmit={handleSaveClosure} className="p-5 overflow-y-auto space-y-4 flex-1">
               {/* Expected Balance Card */}
-              <div className="p-4 bg-slate-900 text-white rounded-2xl space-y-1.5">
-                <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
-                  Saldo Esperado en Efectivo
-                </span>
-                <p className="text-2xl font-black font-mono text-emerald-400">
-                  ${summary.cashBalance.toLocaleString('es-AR')}
-                </p>
-                <p className="text-[11px] text-slate-400">
-                  Calculado de ventas, cobros, gastos y saldo inicial
-                </p>
-              </div>
-
-              {/* Physical Counted Cash Input */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                  Dinero Físico Contado ($) <span className="text-rose-500">*</span>
-                </label>
-                <div className="relative">
-                  <span className="absolute left-3.5 top-2.5 font-bold text-slate-400">$</span>
-                  <NumericInput
-                    min="0"
-                    step="any"
-                    allowDecimal={true}
-                    required
-                    autoFocus
-                    value={countedCashStr}
-                    onChangeRaw={(e) => setCountedCashStr(e.target.value)}
-                    placeholder="0.00"
-                    className="w-full pl-8 pr-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-mono text-base font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
-                  />
-                </div>
-              </div>
-
-              {/* Difference Status Banner */}
               {(() => {
+                const expectedCash = summary.dailyExpectedCash !== undefined ? summary.dailyExpectedCash : summary.cashBalance;
                 const counted = parseFloat(countedCashStr) || 0;
-                const diff = counted - summary.cashBalance;
+                const diff = counted - expectedCash;
 
-                if (diff === 0) {
-                  return (
-                    <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center gap-2 text-xs font-bold text-emerald-800">
-                      <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-                      <span>🟢 Caja exacta: El dinero contado coincide con el saldo esperado.</span>
+                return (
+                  <>
+                    <div className="p-4 bg-slate-900 text-white rounded-2xl space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                          Efectivo Esperado en Caja Diaria
+                        </span>
+                        <span className="text-[10px] font-bold text-slate-300 bg-white/10 px-2 py-0.5 rounded-md">
+                          {getLocationName(currentLocation)}
+                        </span>
+                      </div>
+                      <p className="text-3xl font-black font-mono text-emerald-400">
+                        ${expectedCash.toLocaleString('es-AR')}
+                      </p>
+                      <p className="text-[11px] text-slate-400">
+                        Dinero físico que debería haber en el cajón hoy (inicia en $0 cada día)
+                      </p>
                     </div>
-                  );
-                } else if (diff > 0) {
-                  return (
-                    <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between text-xs font-bold text-emerald-800">
-                      <div className="flex items-center gap-2">
+
+                    {/* Physical Counted Cash Input */}
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                        Dinero Físico Contado ($) <span className="text-rose-500">*</span>
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-3.5 top-2.5 font-bold text-slate-400">$</span>
+                        <NumericInput
+                          min="0"
+                          step="any"
+                          allowDecimal={true}
+                          required
+                          autoFocus
+                          value={countedCashStr}
+                          onChangeRaw={(e) => setCountedCashStr(e.target.value)}
+                          placeholder="0.00"
+                          className="w-full pl-8 pr-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-mono text-base font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Difference Status Banner */}
+                    {diff === 0 ? (
+                      <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center gap-2 text-xs font-bold text-emerald-800">
                         <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-                        <span>🟢 Sobrante de caja:</span>
+                        <span>🟢 Caja exacta: El dinero contado coincide con el saldo esperado ($0 diferencia).</span>
                       </div>
-                      <span className="font-mono font-black text-sm text-emerald-700">
-                        +${diff.toLocaleString('es-AR')}
-                      </span>
-                    </div>
-                  );
-                } else {
-                  return (
-                    <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl flex items-center justify-between text-xs font-bold text-rose-800">
-                      <div className="flex items-center gap-2">
-                        <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
-                        <span>🔴 Faltante de caja:</span>
+                    ) : diff > 0 ? (
+                      <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between text-xs font-bold text-emerald-800">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                          <span>🟢 Sobrante de caja:</span>
+                        </div>
+                        <span className="font-mono font-black text-sm text-emerald-700">
+                          +${diff.toLocaleString('es-AR')}
+                        </span>
                       </div>
-                      <span className="font-mono font-black text-sm text-rose-700">
-                        -${Math.abs(diff).toLocaleString('es-AR')}
-                      </span>
-                    </div>
-                  );
-                }
+                    ) : (
+                      <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl flex items-center justify-between text-xs font-bold text-rose-800">
+                        <div className="flex items-center gap-2">
+                          <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+                          <span>🔴 Faltante de caja:</span>
+                        </div>
+                        <span className="font-mono font-black text-sm text-rose-700">
+                          -${Math.abs(diff).toLocaleString('es-AR')}
+                        </span>
+                      </div>
+                    )}
+                  </>
+                );
               })()}
 
               {/* Observaciones */}
@@ -1349,7 +1611,12 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
                       title="Hacé clic para ver el arqueo detallado"
                     >
                       <div className="flex items-center justify-between border-b border-slate-200/80 pb-2">
-                        <span className="text-xs font-bold text-slate-700 group-hover:text-indigo-700 font-mono transition-colors">{dateFormatted}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-slate-700 group-hover:text-indigo-700 font-mono transition-colors">{dateFormatted}</span>
+                          <span className="text-[10px] font-bold text-slate-600 bg-slate-200/70 px-2 py-0.5 rounded-md">
+                            {getLocationName(c.locationId as any || 'aimogasta')}
+                          </span>
+                        </div>
                         {c.difference === 0 ? (
                           <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md">
                             Exacta
@@ -1401,6 +1668,238 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
                 Cerrar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: TRANSFER TO CAJA GENERAL */}
+      {showTransferToGeneralModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-fadeIn">
+          <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col my-auto max-h-[88dvh]">
+            <div className="p-4 bg-slate-900 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
+                <ArrowUpRight className="w-5 h-5 text-emerald-400" />
+                <h3 className="font-bold text-sm">Retirar a Caja General</h3>
+              </div>
+              <button
+                onClick={() => setShowTransferToGeneralModal(false)}
+                disabled={isSubmittingTransfer}
+                className="p-1.5 text-slate-400 hover:text-white rounded-full transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveTransferToGeneral} className="p-5 overflow-y-auto space-y-4 flex-1">
+              <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs text-emerald-900 leading-relaxed space-y-1">
+                <p className="font-bold">Pase interno de recaudación:</p>
+                <p className="text-[11px] text-emerald-800">
+                  Descuenta el dinero del efectivo físico diario del cajón y lo suma al saldo disponible de Caja General (fondos generales o caja fuerte). No genera gastos operativos ni altera ventas.
+                </p>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    Importe a Retirar ($) <span className="text-rose-500">*</span>
+                  </label>
+                  {summary.dailyExpectedCash > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setTransferAmountStr(summary.dailyExpectedCash.toString())}
+                      className="text-[11px] font-bold text-emerald-700 hover:underline"
+                    >
+                      Todo el cajón (${summary.dailyExpectedCash.toLocaleString('es-AR')})
+                    </button>
+                  )}
+                </div>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-2.5 font-bold text-slate-400">$</span>
+                  <NumericInput
+                    min="0.01"
+                    step="any"
+                    allowDecimal={true}
+                    required
+                    autoFocus
+                    value={transferAmountStr}
+                    onChangeRaw={(e) => setTransferAmountStr(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full pl-8 pr-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-mono text-base font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Observaciones / Motivo <span className="text-slate-400 font-normal">(opcional)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ej: Cierre de jornada, pase a caja fuerte"
+                  value={transferNotes}
+                  onChange={(e) => setTransferNotes(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowTransferToGeneralModal(false)}
+                  disabled={isSubmittingTransfer}
+                  className="px-4 py-2.5 border border-slate-300 hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-xl"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingTransfer}
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5"
+                >
+                  {isSubmittingTransfer ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Transfiriendo...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Confirmar Pase</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: MOVEMENT IN CAJA GENERAL */}
+      {showGeneralMovementModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-fadeIn">
+          <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col my-auto max-h-[88dvh]">
+            <div className="p-4 bg-slate-900 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
+                <Building2 className="w-5 h-5 text-indigo-400" />
+                <h3 className="font-bold text-sm">Movimiento en Caja General</h3>
+              </div>
+              <button
+                onClick={() => setShowGeneralMovementModal(false)}
+                disabled={isSubmittingGeneralMov}
+                className="p-1.5 text-slate-400 hover:text-white rounded-full transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveGeneralMovement} className="p-5 overflow-y-auto space-y-4 flex-1">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Tipo de Movimiento <span className="text-rose-500">*</span>
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setGeneralMovType('INCOME')}
+                    className={`py-2.5 px-3 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 border transition-all ${
+                      generalMovType === 'INCOME'
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-md'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>INGRESO (+)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGeneralMovType('EXPENSE')}
+                    className={`py-2.5 px-3 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 border transition-all ${
+                      generalMovType === 'EXPENSE'
+                        ? 'bg-rose-600 text-white border-rose-600 shadow-md'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <Minus className="w-4 h-4" />
+                    <span>RETIRO / EGRESO (-)</span>
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Concepto / Descripción <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  placeholder="Ej: Retiro de ganancias del negocio / Aporte de capital"
+                  value={generalMovDesc}
+                  onChange={(e) => setGeneralMovDesc(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Importe ($) <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-2.5 font-bold text-slate-400">$</span>
+                  <NumericInput
+                    min="0.01"
+                    step="any"
+                    allowDecimal={true}
+                    required
+                    value={generalMovAmountStr}
+                    onChangeRaw={(e) => setGeneralMovAmountStr(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full pl-8 pr-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-mono text-base font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Observaciones <span className="text-slate-400 font-normal">(opcional)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Detalles adicionales..."
+                  value={generalMovNotes}
+                  onChange={(e) => setGeneralMovNotes(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowGeneralMovementModal(false)}
+                  disabled={isSubmittingGeneralMov}
+                  className="px-4 py-2.5 border border-slate-300 hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-xl"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingGeneralMov}
+                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5"
+                >
+                  {isSubmittingGeneralMov ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Guardando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Registrar en Caja General</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
