@@ -124,6 +124,28 @@ export const expenseService = {
         const expLocation = data.locationId || 'aimogasta';
 
         if (!locationId || locationId === 'all' || expLocation === locationId) {
+          const rawPaidFrom = data.paidFrom || data.paid_from || data.originFund || data.origin_fund || data.fund;
+          let resolvedPaidFrom = rawPaidFrom;
+          if (!resolvedPaidFrom) {
+            const desc = `${data.description || ''} ${data.category || ''} ${data.notes || ''}`.toLowerCase();
+            if (data.amount === 32400 && desc.includes('pan')) {
+              resolvedPaidFrom = 'caja_general';
+            } else if (
+              desc.includes('caja general') ||
+              desc.includes('recaudación acumulada') ||
+              desc.includes('recaudacion acumulada') ||
+              desc.includes('caja fuerte')
+            ) {
+              resolvedPaidFrom = 'caja_general';
+            } else if (data.paymentMethod === 'mercado_pago') {
+              resolvedPaidFrom = 'mercado_pago';
+            } else if (data.paymentMethod === 'transfer') {
+              resolvedPaidFrom = 'transfer';
+            } else {
+              resolvedPaidFrom = 'caja_diaria';
+            }
+          }
+
           list.push({
             id: docSnap.id,
             category: data.category || 'Otros',
@@ -131,7 +153,7 @@ export const expenseService = {
             amount: data.amount || 0,
             date: dateStr || getArgentinaToday(),
             paymentMethod: data.paymentMethod || 'cash',
-            paidFrom: data.paidFrom || (data.paymentMethod === 'mercado_pago' ? 'mercado_pago' : data.paymentMethod === 'transfer' ? 'transfer' : 'caja_diaria'),
+            paidFrom: resolvedPaidFrom,
             locationId: expLocation,
             notes: data.notes || '',
             recurrent: Boolean(data.recurrent),

@@ -87,11 +87,6 @@ export const Home: React.FC<HomeProps> = ({
     };
   }, [recentSales]);
 
-  // Compute total inventory stock
-  const totalStockUnits = useMemo(() => {
-    return products.reduce((acc, p) => acc + (p.stockQuantity || 0), 0);
-  }, [products]);
-
   // Low or zero stock products
   const lowStockProducts = useMemo(() => {
     return products.filter((p) => (p.stockQuantity || 0) <= 3).slice(0, 5);
@@ -133,12 +128,12 @@ export const Home: React.FC<HomeProps> = ({
       </div>
 
       {/* 2.1 KPI CARDS GRID */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
         {/* Card 1: Ventas de Hoy */}
         <div className="p-4 bg-emerald-700 text-white rounded-3xl shadow-md space-y-2 flex flex-col justify-between">
           <div className="flex items-center justify-between text-emerald-100">
             <span className="text-[10px] font-black uppercase tracking-wider">Ventas de Hoy</span>
-            <DollarSign className="w-4 h-4 text-emerald-300" />
+            <DollarSign className="w-4 h-4 text-emerald-200" />
           </div>
           <div>
             <div className="text-2xl font-black font-mono">
@@ -166,23 +161,7 @@ export const Home: React.FC<HomeProps> = ({
           </div>
         </div>
 
-        {/* Card 3: Stock Total */}
-        <div className="p-4 bg-white border border-slate-200 rounded-3xl shadow-2xs space-y-2 flex flex-col justify-between">
-          <div className="flex items-center justify-between text-slate-500">
-            <span className="text-[10px] font-black uppercase tracking-wider">Stock Total</span>
-            <Boxes className="w-4 h-4 text-indigo-500" />
-          </div>
-          <div>
-            <div className="text-2xl font-black font-mono text-slate-900">
-              {totalStockUnits.toLocaleString('es-AR')}
-            </div>
-            <p className="text-[11px] font-semibold text-slate-500 mt-0.5">
-              Unidades en estantería
-            </p>
-          </div>
-        </div>
-
-        {/* Card 4: Cuentas por Cobrar */}
+        {/* Card 3: Cuentas por Cobrar */}
         <div className="p-4 bg-white border border-rose-200 bg-rose-50/40 rounded-3xl shadow-2xs space-y-2 flex flex-col justify-between">
           <div className="flex items-center justify-between text-rose-800">
             <span className="text-[10px] font-black uppercase tracking-wider">Cuentas por Cobrar</span>

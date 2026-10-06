@@ -12,14 +12,16 @@ interface FirebaseConfig {
 }
 
 // Environment variable configuration for GitHub Pages / Vite environment
+const env = (typeof import.meta !== 'undefined' && import.meta.env) ? import.meta.env : (typeof process !== 'undefined' && process.env ? process.env : {} as any);
+
 const firebaseConfig: FirebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyDjP4fpjUgW5ftp3m1YjmPTvuDKSW9ZsXY",
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "liquid-doodad-4zp2g.firebaseapp.com",
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "liquid-doodad-4zp2g",
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "",
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "",
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:117057487585:web:68de5c25aabbfc3c76eda0",
-  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || "ai-studio-despensastock-6c9133a4-6db3-4fc7-a728-d7b9304bd803",
+  apiKey: env.VITE_FIREBASE_API_KEY || "AIzaSyDjP4fpjUgW5ftp3m1YjmPTvuDKSW9ZsXY",
+  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || "liquid-doodad-4zp2g.firebaseapp.com",
+  projectId: env.VITE_FIREBASE_PROJECT_ID || "liquid-doodad-4zp2g",
+  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || "",
+  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || "",
+  appId: env.VITE_FIREBASE_APP_ID || "1:117057487585:web:68de5c25aabbfc3c76eda0",
+  firestoreDatabaseId: env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || "ai-studio-despensastock-6c9133a4-6db3-4fc7-a728-d7b9304bd803",
 };
 
 let app: FirebaseApp;

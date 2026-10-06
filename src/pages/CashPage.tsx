@@ -6,7 +6,9 @@ import {
   CashPaymentMethod, 
   CashMovementType 
 } from '../types/cash';
-import { cashService } from '../services/firebase/cashService';
+import { cashService, resolveMovementFund } from '../services/firebase/cashService';
+import { expenseService } from '../services/firebase/expenseService';
+import { ExpenseCategory, ExpensePaidFrom, EXPENSE_CATEGORIES, EXPENSE_PAID_FROM_OPTIONS } from '../types/expense';
 import { NumericInput } from '../components/common/NumericInput';
 import { CashMovementDetailModal } from '../components/modals/CashMovementDetailModal';
 import { CashClosureDetailModal } from '../components/modals/CashClosureDetailModal';
@@ -63,7 +65,9 @@ interface CashPageProps {
 
 export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' }) => {
   const { currentLocation } = useLocation();
-  const [activeSubTab, setActiveSubTab] = useState<'movements' | 'expenses' | 'closures'>(initialSubTab);
+  const [activeMainTab, setActiveMainTab] = useState<'caja_diaria' | 'caja_general' | 'expenses'>(
+    initialSubTab === 'expenses' ? 'expenses' : initialSubTab === 'closures' ? 'caja_general' : 'caja_diaria'
+  );
   const [summary, setSummary] = useState<CashBalanceSummary>({
     cashBalance: 0,
     mercadoPagoBalance: 0,
@@ -78,18 +82,35 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
     todayMercadoPago: 0,
     todayTransfer: 0,
     todayOther: 0,
+    dailyExpectedCash: 0,
+    dailyCashIncome: 0,
+    dailyCashExpense: 0,
+    dailyTransfersToGeneral: 0,
+    cajaGeneralBalance: 0,
   });
-
-  const [showHistoricalBalances, setShowHistoricalBalances] = useState<boolean>(false);
 
   const [movements, setMovements] = useState<CashMovement[]>([]);
   const [closures, setClosures] = useState<CashClosure[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
-  // Filters
-  const [periodFilter, setPeriodFilter] = useState<'today' | 'yesterday' | 'week' | 'month' | 'all'>('today');
-  const [methodFilter, setMethodFilter] = useState<string>('all');
-  const [typeFilter, setTypeFilter] = useState<string>('all');
+  // Quick expense form states
+  const [showQuickExpenseModal, setShowQuickExpenseModal] = useState<boolean>(false);
+  const [quickExpDesc, setQuickExpDesc] = useState<string>('');
+  const [quickExpAmountStr, setQuickExpAmountStr] = useState<string>('');
+  const [quickExpCategory, setQuickExpCategory] = useState<ExpenseCategory>('Otros');
+  const [quickExpPaidFrom, setQuickExpPaidFrom] = useState<ExpensePaidFrom>('caja_diaria');
+  const [quickExpNotes, setQuickExpNotes] = useState<string>('');
+  const [isSubmittingQuickExp, setIsSubmittingQuickExp] = useState<boolean>(false);
+
+  // Filters for Caja Diaria Movimientos
+  const [todaySearch, setTodaySearch] = useState<string>('');
+  const [todayMethodFilter, setTodayMethodFilter] = useState<string>('all');
+
+  // Filters for Caja General Movimientos
+  const [genPeriodFilter, setGenPeriodFilter] = useState<'all' | 'today' | 'month'>('all');
+  const [genFundFilter, setGenFundFilter] = useState<'all' | 'caja_general' | 'mercado_pago' | 'transfer'>('all');
+  const [genTypeFilter, setGenTypeFilter] = useState<'all' | 'SUPPLIER_PAYMENT' | 'EXPENSE' | 'MANUAL' | 'INTERNAL_TRANSFER'>('all');
+  const [genSearch, setGenSearch] = useState<string>('');
 
   // Modals
   const [showManualModal, setShowManualModal] = useState<boolean>(false);
@@ -234,6 +255,50 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
   const [generalMovNotes, setGeneralMovNotes] = useState<string>('');
   const [isSubmittingGeneralMov, setIsSubmittingGeneralMov] = useState<boolean>(false);
 
+  // Handle quick expense
+  const handleSaveQuickExpense = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const amount = parseFloat(quickExpAmountStr);
+    if (!quickExpDesc.trim()) {
+      setFeedback({ type: 'error', message: 'Ingresá un concepto o descripción para el gasto.' });
+      return;
+    }
+    if (isNaN(amount) || amount <= 0) {
+      setFeedback({ type: 'error', message: 'Ingresá un importe mayor a $0.' });
+      return;
+    }
+
+    setIsSubmittingQuickExp(true);
+    try {
+      const pm: CashPaymentMethod = quickExpPaidFrom === 'mercado_pago' ? 'mercado_pago' : quickExpPaidFrom === 'transfer' ? 'transfer' : 'cash';
+
+      await expenseService.createExpense({
+        category: quickExpCategory,
+        description: quickExpDesc.trim(),
+        amount,
+        paymentMethod: pm,
+        paidFrom: quickExpPaidFrom,
+        date: getArgentinaToday(),
+        notes: quickExpNotes.trim(),
+        locationId: currentLocation,
+        recurrent: false,
+      });
+
+      const fundLabel = quickExpPaidFrom === 'caja_diaria' ? 'Caja Diaria' : quickExpPaidFrom === 'caja_general' ? 'Caja General' : quickExpPaidFrom === 'mercado_pago' ? 'Mercado Pago' : 'Transferencia';
+      setFeedback({ type: 'success', message: `Gasto de $${amount.toLocaleString('es-AR')} (${quickExpDesc.trim()}) registrado desde ${fundLabel}.` });
+      setShowQuickExpenseModal(false);
+      setQuickExpDesc('');
+      setQuickExpAmountStr('');
+      setQuickExpNotes('');
+      setQuickExpPaidFrom('caja_diaria');
+      await loadData();
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err.message || 'Error al registrar el gasto.' });
+    } finally {
+      setIsSubmittingQuickExp(false);
+    }
+  };
+
   // Handle save cash closure
   const handleSaveClosure = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -247,7 +312,18 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
 
     setIsSubmittingClosure(true);
     try {
-      const closure = await cashService.createCashClosure(expectedCash, countedCash, closureNotes.trim(), currentLocation);
+      const closure = await cashService.createCashClosure(
+        expectedCash, 
+        countedCash, 
+        closureNotes.trim(), 
+        currentLocation,
+        {
+          cashCollected: summary.dailyCashIncome || 0,
+          mercadoPagoCollected: summary.todayMercadoPago > 0 ? summary.todayMercadoPago : 0,
+          transferCollected: summary.todayTransfer > 0 ? summary.todayTransfer : 0,
+          totalCollected: (summary.dailyCashIncome || 0) + (summary.todayMercadoPago > 0 ? summary.todayMercadoPago : 0) + (summary.todayTransfer > 0 ? summary.todayTransfer : 0)
+        }
+      );
       const diffText = closure.difference === 0 
         ? 'Caja exacta' 
         : closure.difference > 0 
@@ -325,32 +401,111 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
     }
   };
 
-  // Filtered movements calculation
-  const filteredMovements = useMemo(() => {
-    const todayStr = getArgentinaToday();
-    const yesterdayStr = getArgentinaYesterday();
-    const weekAgoStr = getArgentinaDaysAgo(7);
-    const firstOfMonthStr = getArgentinaFirstOfMonth();
+  const todayStr = getArgentinaToday();
+  const currentMonthStr = getArgentinaFirstOfMonth();
 
+  // 1. MOVIMIENTOS DE HOY (para Caja Diaria)
+  const todayMovements = useMemo(() => {
+    return movements
+      .filter((mov) => {
+        const movDate = mov.date || toArgentinaDateString(mov.createdAt) || todayStr;
+        if (movDate !== todayStr) return false;
+
+        if (todayMethodFilter !== 'all') {
+          const fund = resolveMovementFund(mov);
+          if (todayMethodFilter === 'cash' && mov.paymentMethod !== 'cash') return false;
+          if (todayMethodFilter === 'mercado_pago' && mov.paymentMethod !== 'mercado_pago') return false;
+          if (todayMethodFilter === 'transfer' && mov.paymentMethod !== 'transfer') return false;
+          if (todayMethodFilter === 'credit' && mov.paymentMethod !== 'credit') return false;
+          if (todayMethodFilter === 'caja_diaria' && fund !== 'caja_diaria') return false;
+        }
+
+        if (todaySearch.trim()) {
+          const q = todaySearch.toLowerCase();
+          const desc = (mov.description || '').toLowerCase();
+          const notes = (mov.notes || '').toLowerCase();
+          const prov = (mov.providerName || '').toLowerCase();
+          const cust = (mov.customerName || '').toLowerCase();
+          if (!desc.includes(q) && !notes.includes(q) && !prov.includes(q) && !cust.includes(q)) return false;
+        }
+
+        return true;
+      })
+      .sort((a, b) => {
+        const timeA = new Date(a.createdAt || a.date).getTime();
+        const timeB = new Date(b.createdAt || b.date).getTime();
+        return timeB - timeA;
+      });
+  }, [movements, todayStr, todayMethodFilter, todaySearch]);
+
+  // 2. TOTAL DISPONIBLE (para Caja General: exactamente la suma de los 3 fondos)
+  const generalCash = summary.cajaGeneralBalance || 0;
+  const mpBalance = summary.mercadoPagoBalance || 0;
+  const transferBalance = summary.transferBalance || 0;
+  const totalDisponible = generalCash + mpBalance + transferBalance;
+
+  // 3. MOVIMIENTOS / EGRESOS DE CAJA GENERAL
+  const generalMovements = useMemo(() => {
     return movements.filter((mov) => {
-      // 1. Period filter (always using Argentina calendar date)
-      const movDate = mov.date || toArgentinaDateString(mov.createdAt) || todayStr;
-      if (periodFilter === 'today' && movDate !== todayStr) return false;
-      if (periodFilter === 'yesterday' && movDate !== yesterdayStr) return false;
-      if (periodFilter === 'week' && movDate < weekAgoStr) return false;
-      if (periodFilter === 'month' && movDate < firstOfMonthStr) return false;
-
-      // 2. Method filter
-      if (methodFilter !== 'all' && mov.paymentMethod !== methodFilter) return false;
-
-      // 3. Type filter
-      if (typeFilter === 'INCOME' && (mov.type !== 'INCOME' || mov.paymentMethod === 'credit')) return false;
-      if (typeFilter === 'EXPENSE' && mov.type !== 'EXPENSE') return false;
-      if (typeFilter === 'CREDIT' && mov.paymentMethod !== 'credit') return false;
-
-      return true;
+      if (mov.sourceType === 'INTERNAL_TRANSFER') return true;
+      if (mov.sourceType === 'SUPPLIER_PAYMENT') return true;
+      const fund = resolveMovementFund(mov);
+      return fund === 'caja_general' || fund === 'mercado_pago' || fund === 'transfer';
     });
-  }, [movements, periodFilter, methodFilter, typeFilter]);
+  }, [movements]);
+
+  const filteredGeneralMovements = useMemo(() => {
+    return generalMovements
+      .filter((mov) => {
+        const movDate = mov.date || toArgentinaDateString(mov.createdAt) || todayStr;
+        if (genPeriodFilter === 'today' && movDate !== todayStr) return false;
+        if (genPeriodFilter === 'month' && movDate < currentMonthStr) return false;
+
+        if (genFundFilter !== 'all') {
+          const fund = resolveMovementFund(mov);
+          if (fund !== genFundFilter) return false;
+        }
+
+        if (genTypeFilter !== 'all') {
+          if (mov.sourceType !== genTypeFilter) return false;
+        }
+
+        if (genSearch.trim()) {
+          const q = genSearch.toLowerCase();
+          const desc = (mov.description || '').toLowerCase();
+          const notes = (mov.notes || '').toLowerCase();
+          const prov = (mov.providerName || '').toLowerCase();
+          if (!desc.includes(q) && !notes.includes(q) && !prov.includes(q)) return false;
+        }
+
+        return true;
+      })
+      .sort((a, b) => {
+        const timeA = new Date(a.createdAt || a.date).getTime();
+        const timeB = new Date(b.createdAt || b.date).getTime();
+        return timeB - timeA;
+      });
+  }, [generalMovements, genPeriodFilter, genFundFilter, genTypeFilter, genSearch, todayStr, currentMonthStr]);
+
+  // Fund badges helper
+  const renderFundBadge = (mov: CashMovement) => {
+    const fund = resolveMovementFund(mov);
+    if (fund === 'caja_general') {
+      return (
+        <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200">
+          Caja General
+        </span>
+      );
+    }
+    if (fund === 'caja_diaria' && mov.paymentMethod === 'cash') {
+      return (
+        <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">
+          Caja Diaria
+        </span>
+      );
+    }
+    return null;
+  };
 
   // Method badges helper
   const renderMethodBadge = (method: CashPaymentMethod) => {
@@ -437,12 +592,20 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
           </button>
 
           <button
+            onClick={() => setShowQuickExpenseModal(true)}
+            className="px-3.5 py-2.5 bg-rose-600/90 hover:bg-rose-600 text-white text-xs font-bold rounded-2xl shadow-md transition-all flex items-center gap-1.5 active:scale-98"
+          >
+            <Receipt className="w-3.5 h-3.5" />
+            <span>Registrar Gasto</span>
+          </button>
+
+          <button
             onClick={() => {
               const expected = summary.dailyExpectedCash !== undefined ? summary.dailyExpectedCash : summary.cashBalance;
               setCountedCashStr(expected.toString());
               setShowClosureModal(true);
             }}
-            className="px-3.5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-2xl shadow-md transition-all flex items-center gap-1.5"
+            className="px-3.5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-2xl shadow-md transition-all flex items-center gap-1.5 active:scale-98"
           >
             <Lock className="w-3.5 h-3.5" />
             <span>Cerrar Caja Diaria</span>
@@ -463,42 +626,42 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
         </div>
       </div>
 
-      {/* SUB-NAVIGATION TABS: Movimientos | Gastos | Cierres */}
+      {/* NAVEGACIÓN PRINCIPAL: CAJA DIARIA | CAJA GENERAL | GASTOS */}
       <div className="flex items-center gap-2 p-1.5 bg-white border border-slate-200 rounded-2xl shadow-2xs">
         <button
-          onClick={() => setActiveSubTab('movements')}
-          className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
-            activeSubTab === 'movements'
-              ? 'bg-emerald-600 text-white shadow-sm'
+          onClick={() => setActiveMainTab('caja_diaria')}
+          className={`flex-1 py-3 px-3 sm:px-4 rounded-xl text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-2 ${
+            activeMainTab === 'caja_diaria'
+              ? 'bg-emerald-600 text-white shadow-md'
               : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
           }`}
         >
-          <ArrowLeftRight className="w-4 h-4" />
-          <span>Movimientos</span>
+          <DollarSign className="w-4 h-4 stroke-[2.5]" />
+          <span>Caja Diaria (Hoy)</span>
         </button>
 
         <button
-          onClick={() => setActiveSubTab('expenses')}
-          className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
-            activeSubTab === 'expenses'
-              ? 'bg-rose-600 text-white shadow-sm'
+          onClick={() => setActiveMainTab('caja_general')}
+          className={`flex-1 py-3 px-3 sm:px-4 rounded-xl text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-2 ${
+            activeMainTab === 'caja_general'
+              ? 'bg-indigo-600 text-white shadow-md'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+          }`}
+        >
+          <Building2 className="w-4 h-4 stroke-[2.5]" />
+          <span>Caja General ({closures.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveMainTab('expenses')}
+          className={`py-3 px-3.5 sm:px-5 rounded-xl text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-2 ${
+            activeMainTab === 'expenses'
+              ? 'bg-rose-600 text-white shadow-md'
               : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
           }`}
         >
           <Receipt className="w-4 h-4" />
           <span>Gastos</span>
-        </button>
-
-        <button
-          onClick={() => setActiveSubTab('closures')}
-          className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
-            activeSubTab === 'closures'
-              ? 'bg-indigo-600 text-white shadow-sm'
-              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-          }`}
-        >
-          <Lock className="w-4 h-4" />
-          <span>Cierres ({closures.length})</span>
         </button>
       </div>
 
@@ -525,63 +688,446 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
         </div>
       )}
 
-      {/* SUB-TAB 2: GASTOS EMBEDDED */}
-      {activeSubTab === 'expenses' && (
-        <div className="animate-fadeIn">
-          <ExpensesPage isEmbedded={true} onBackToHome={() => setActiveSubTab('movements')} />
+      {/* ========================================================================= */}
+      {/* VISTA 1: CAJA DIARIA (OPERATORIA DE HOY)                                   */}
+      {/* ========================================================================= */}
+      {activeMainTab === 'caja_diaria' && (
+        <div className="space-y-6 animate-fadeIn">
+          {/* Tarjeta Protagonista: Caja Diaria */}
+          <div className="p-6 bg-gradient-to-br from-emerald-900 via-slate-900 to-slate-900 text-white rounded-3xl shadow-xl border border-emerald-700/40 relative overflow-hidden space-y-5">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl -mr-20 -mt-20 pointer-events-none" />
+
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 relative z-10 border-b border-white/10 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30 shadow-inner shrink-0">
+                  <DollarSign className="w-6 h-6 stroke-[2.5]" />
+                </div>
+                <div>
+                  <h2 className="text-base font-black uppercase tracking-wider text-emerald-300">
+                    Caja Diaria
+                  </h2>
+                  <p className="text-xs text-slate-300">
+                    Operatoria del día actual • Inicia en $0 cada jornada ({formatLocalDate(todayStr)})
+                  </p>
+                </div>
+              </div>
+              <span className="text-[11px] font-extrabold px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 uppercase tracking-wider self-start sm:self-auto font-mono">
+                {getLocationName(currentLocation)}
+              </span>
+            </div>
+
+            {/* Número Protagonista: Efectivo Esperado en Caja */}
+            <div className="p-5 bg-white/10 rounded-2xl border border-white/15 backdrop-blur-xs space-y-1.5 relative z-10">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-emerald-200/90 block">
+                Efectivo Esperado en Caja
+              </span>
+              <p className="text-4xl sm:text-5xl font-black font-mono text-emerald-300 tracking-tight">
+                ${(summary.dailyExpectedCash || 0).toLocaleString('es-AR')}
+              </p>
+              <p className="text-xs text-slate-300 font-medium">
+                ¿Cuánto efectivo debería haber físicamente ahora mismo en el cajón?
+              </p>
+            </div>
+
+            {/* Pequeño Desglose Subordinado (solo entradas y salidas al cajón) */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-xs relative z-10">
+              <div className="p-3 bg-black/25 rounded-2xl border border-white/5 space-y-0.5">
+                <span className="text-[10px] uppercase font-extrabold text-slate-400 block">
+                  Entradas al Cajón
+                </span>
+                <span className="font-mono font-bold text-sm text-emerald-400 block">
+                  +${(summary.dailyCashIncome || 0).toLocaleString('es-AR')}
+                </span>
+                <span className="text-[10px] text-slate-400">Ventas y cobros efectivo</span>
+              </div>
+
+              <div className="p-3 bg-black/25 rounded-2xl border border-white/5 space-y-0.5">
+                <span className="text-[10px] uppercase font-extrabold text-slate-400 block">
+                  Salidas del Cajón
+                </span>
+                <span className="font-mono font-bold text-sm text-rose-400 block">
+                  -${(summary.dailyCashExpense || 0).toLocaleString('es-AR')}
+                </span>
+                <span className="text-[10px] text-slate-400">Gastos pagados con efectivo</span>
+              </div>
+
+              <div className="p-3 bg-black/25 rounded-2xl border border-white/5 space-y-0.5 col-span-2 sm:col-span-1">
+                <span className="text-[10px] uppercase font-extrabold text-slate-400 block">
+                  Pases a Caja General
+                </span>
+                <span className="font-mono font-bold text-sm text-amber-300 block">
+                  -${(summary.dailyTransfersToGeneral || 0).toLocaleString('es-AR')}
+                </span>
+                <span className="text-[10px] text-slate-400">Retirado a fondos generales</span>
+              </div>
+            </div>
+
+            {/* Acciones Rápidas de Caja Diaria */}
+            <div className="pt-2 flex flex-wrap items-center gap-2.5 relative z-10 border-t border-white/10">
+              <button
+                onClick={() => setShowQuickExpenseModal(true)}
+                className="py-2.5 px-4 bg-rose-600 hover:bg-rose-500 active:scale-98 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5"
+              >
+                <Receipt className="w-4 h-4" />
+                <span>Registrar Gasto</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  const expected = summary.dailyExpectedCash !== undefined ? summary.dailyExpectedCash : summary.cashBalance;
+                  setCountedCashStr(expected.toString());
+                  setShowClosureModal(true);
+                }}
+                className="py-2.5 px-4 bg-emerald-400 hover:bg-emerald-300 active:scale-98 text-slate-950 font-black text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5"
+              >
+                <Lock className="w-4 h-4 stroke-[2.5]" />
+                <span>Cerrar Caja Diaria / Arqueo</span>
+              </button>
+
+              <button
+                onClick={() => setShowTransferToGeneralModal(true)}
+                className="py-2.5 px-3.5 bg-white/15 hover:bg-white/25 active:scale-98 text-white font-bold text-xs rounded-xl transition-all border border-white/20 flex items-center justify-center gap-1.5 ml-auto"
+                title="Pasar recaudación del día a la Caja General"
+              >
+                <ArrowUpRight className="w-4 h-4 text-emerald-300" />
+                <span>Retirar a Caja General</span>
+              </button>
+            </div>
+          </div>
+
+          {/* HISTORIAL DE CAJA DIARIA: MOVIMIENTOS DE HOY */}
+          <div className="bg-white border border-slate-200 rounded-3xl shadow-2xs p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl">
+                  <History className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-black uppercase tracking-wider text-slate-900">
+                      Movimientos de Hoy
+                    </h3>
+                    <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                      {todayMovements.length} operaciones
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 font-medium">
+                    Toda la operatoria registrada hoy ({formatLocalDate(todayStr)})
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Filtros para Movimientos de Hoy */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 text-xs">
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  placeholder="Buscar por concepto, cliente, proveedor u observación..."
+                  value={todaySearch}
+                  onChange={(e) => setTodaySearch(e.target.value)}
+                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+                {todaySearch && (
+                  <button
+                    onClick={() => setTodaySearch('')}
+                    className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              <select
+                value={todayMethodFilter}
+                onChange={(e) => setTodayMethodFilter(e.target.value)}
+                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500"
+              >
+                <option value="all">Medio de Pago: Todos</option>
+                <option value="cash">Solo Efectivo</option>
+                <option value="mercado_pago">Solo Mercado Pago</option>
+                <option value="transfer">Solo Transferencia</option>
+                <option value="credit">Solo Fiados / Cta. Cte.</option>
+                <option value="caja_diaria">Solo los que afectan el cajón</option>
+              </select>
+            </div>
+
+            {/* Listado de Movimientos de Hoy */}
+            {loading ? (
+              <div className="py-12 flex flex-col items-center justify-center space-y-2">
+                <Loader2 className="w-8 h-8 text-emerald-600 animate-spin" />
+                <p className="text-xs font-semibold text-slate-500">Cargando movimientos de hoy...</p>
+              </div>
+            ) : todayMovements.length === 0 ? (
+              <div className="py-12 text-center space-y-2">
+                <Wallet className="w-10 h-10 text-slate-300 mx-auto" />
+                <p className="text-sm font-bold text-slate-700">Sin movimientos registrados hoy</p>
+                <p className="text-xs text-slate-400 max-w-xs mx-auto">
+                  Aún no se han asentado ventas, cobros ni gastos durante la jornada de hoy.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {todayMovements.map((mov) => {
+                  const isIncome = mov.type === 'INCOME';
+                  const isFiado = mov.paymentMethod === 'credit';
+                  const fund = resolveMovementFund(mov);
+                  const affectsDrawer = fund === 'caja_diaria';
+
+                  return (
+                    <div
+                      key={mov.id}
+                      onClick={() => {
+                        if (mov.sourceType === 'SALE') {
+                          setLinkedSaleId(mov.sourceId);
+                        } else if (mov.sourceType === 'CUSTOMER_PAYMENT') {
+                          setLinkedPaymentId(mov.sourceId);
+                        } else if (mov.sourceType === 'EXPENSE') {
+                          setLinkedExpenseId(mov.sourceId);
+                        } else {
+                          setSelectedMovementForDetail(mov);
+                        }
+                      }}
+                      className="p-3.5 bg-slate-50/70 border border-slate-200/80 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-white hover:border-emerald-300 hover:shadow-xs transition-all shadow-2xs cursor-pointer group"
+                      title="Hacé clic para ver el detalle de este movimiento"
+                    >
+                      <div className="flex items-center gap-3">
+                        {/* Icono de Tipo */}
+                        {isFiado ? (
+                          <div className="w-10 h-10 rounded-2xl shrink-0 flex items-center justify-center text-amber-800 bg-amber-100/90 border border-amber-200 shadow-xs font-black">
+                            <Receipt className="w-5 h-5 text-amber-700" />
+                          </div>
+                        ) : (
+                          <div
+                            className={`w-10 h-10 rounded-2xl shrink-0 flex items-center justify-center text-white font-black shadow-xs ${
+                              isIncome ? 'bg-emerald-600' : 'bg-rose-500'
+                            }`}
+                          >
+                            {isIncome ? <Plus className="w-5 h-5" /> : <Minus className="w-5 h-5" />}
+                          </div>
+                        )}
+
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-sm text-slate-900 group-hover:text-emerald-700 transition-colors">
+                              {mov.description}
+                            </span>
+                            {renderSourceBadge(mov.sourceType)}
+                            {renderMethodBadge(mov.paymentMethod)}
+
+                            {/* Badge de Impacto en el Cajón */}
+                            {isFiado ? (
+                              <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200">
+                                Fiado (Sin ingreso)
+                              </span>
+                            ) : affectsDrawer ? (
+                              <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                Afecta cajón físico
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-200">
+                                No afecta cajón físico
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono flex-wrap">
+                            <span>{formatLocalDateTime(mov.createdAt || mov.date)}</span>
+                            {mov.customerName && (
+                              <span className="text-slate-600 font-sans font-medium">
+                                • Cliente: <strong>{mov.customerName}</strong>
+                              </span>
+                            )}
+                            {mov.providerName && (
+                              <span className="text-slate-600 font-sans font-medium">
+                                • Proveedor: <strong>{mov.providerName}</strong>
+                              </span>
+                            )}
+                            {mov.notes && (
+                              <span className="text-slate-500 font-sans italic truncate max-w-xs">
+                                • {mov.notes}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center sm:flex-col sm:items-end justify-between gap-1 shrink-0">
+                        {isFiado ? (
+                          <div className="text-right">
+                            <p className="text-base font-black font-mono text-slate-700 sm:mt-0.5">
+                              ${mov.amount.toLocaleString('es-AR')}
+                            </p>
+                          </div>
+                        ) : (
+                          <p className={`text-base font-black font-mono ${isIncome ? 'text-emerald-700' : 'text-rose-600'}`}>
+                            {isIncome ? '+' : '-'}${mov.amount.toLocaleString('es-AR')}
+                          </p>
+                        )}
+                        <span className="text-[10px] text-slate-400 font-bold group-hover:text-emerald-600 flex items-center gap-0.5 transition-colors">
+                          <span>Ver detalle</span>
+                          <ChevronRight className="w-3 h-3" />
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      {/* SUB-TAB 3: CIERRES DIRECT VIEW */}
-      {activeSubTab === 'closures' && (
-        <div className="space-y-4 animate-fadeIn">
-          <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-2xs space-y-4">
+      {/* ========================================================================= */}
+      {/* VISTA 2: CAJA GENERAL (FONDOS ACUMULADOS & CIERRES)                        */}
+      {/* ========================================================================= */}
+      {activeMainTab === 'caja_general' && (
+        <div className="space-y-6 animate-fadeIn">
+          {/* Bloque Superior: CAJA GENERAL & TOTAL DISPONIBLE */}
+          <div className="p-6 bg-white border border-slate-200 rounded-3xl shadow-sm space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-200 shrink-0">
+                  <Building2 className="w-6 h-6 stroke-[2.2]" />
+                </div>
+                <div>
+                  <h2 className="text-base font-black uppercase tracking-wider text-slate-900">
+                    Caja General
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Dinero acumulado y disponible en el negocio
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowGeneralMovementModal(true)}
+                  className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center gap-1.5 active:scale-98"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>+ Movimiento Caja General</span>
+                </button>
+                <button
+                  onClick={() => setShowTransferToGeneralModal(true)}
+                  className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 active:scale-98"
+                >
+                  <ArrowUpRight className="w-3.5 h-3.5" />
+                  <span>Ingresar desde Diaria</span>
+                </button>
+              </div>
+            </div>
+
+            {/* TOTAL DISPONIBLE (Protagonista Grande) */}
+            <div className="p-5 bg-gradient-to-r from-slate-900 to-indigo-950 text-white rounded-2xl shadow-md space-y-1.5">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-indigo-300 block">
+                Total Disponible
+              </span>
+              <p className="text-4xl sm:text-5xl font-black font-mono text-white tracking-tight">
+                ${totalDisponible.toLocaleString('es-AR')}
+              </p>
+              <p className="text-xs text-slate-300 font-medium">
+                Suma consolidada de efectivo acumulado, cuenta digital de Mercado Pago y transferencias bancarias.
+              </p>
+            </div>
+
+            {/* COMPOSICIÓN DE FONDOS (Exactamente 3 tarjetas, sin duplicados) */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+              {/* 1. Efectivo General */}
+              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] uppercase font-black text-slate-500">
+                    Efectivo General
+                  </span>
+                  <DollarSign className="w-4 h-4 text-emerald-600" />
+                </div>
+                <p className="text-2xl font-black font-mono text-slate-900">
+                  ${generalCash.toLocaleString('es-AR')}
+                </p>
+                <p className="text-[11px] text-slate-400">Fondos acumulados / Caja fuerte</p>
+              </div>
+
+              {/* 2. Mercado Pago */}
+              <div className="p-4 bg-sky-50/70 rounded-2xl border border-sky-100 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] uppercase font-black text-sky-800">
+                    Mercado Pago
+                  </span>
+                  <Smartphone className="w-4 h-4 text-sky-600" />
+                </div>
+                <p className="text-2xl font-black font-mono text-sky-900">
+                  ${mpBalance.toLocaleString('es-AR')}
+                </p>
+                <p className="text-[11px] text-sky-700/80">Saldo disponible en cuenta digital MP</p>
+              </div>
+
+              {/* 3. Transferencias / Banco */}
+              <div className="p-4 bg-indigo-50/70 rounded-2xl border border-indigo-100 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] uppercase font-black text-indigo-800">
+                    Transferencias / Banco
+                  </span>
+                  <Building2 className="w-4 h-4 text-indigo-600" />
+                </div>
+                <p className="text-2xl font-black font-mono text-indigo-900">
+                  ${transferBalance.toLocaleString('es-AR')}
+                </p>
+                <p className="text-[11px] text-indigo-700/80">Cuentas bancarias y depósitos</p>
+              </div>
+            </div>
+          </div>
+
+          {/* HISTORIAL DE CIERRES EN CAJA GENERAL */}
+          <div className="bg-white border border-slate-200 rounded-3xl shadow-2xs p-5 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
                   <Lock className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="text-sm font-bold text-slate-900">Arqueos y Cierres de Caja</h2>
-                  <p className="text-xs text-slate-500">Historial completo de arqueos y balances finales</p>
+                  <h3 className="text-sm font-black uppercase tracking-wider text-slate-900">
+                    Historial de Cierres
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Consolidación de recaudación en Caja General y arqueos de caja
+                  </p>
                 </div>
               </div>
 
-              <button
-                onClick={() => {
-                  setCountedCashStr(summary.cashBalance.toString());
-                  setShowClosureModal(true);
-                }}
-                className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 self-start sm:self-auto"
-              >
-                <Lock className="w-4 h-4" />
-                <span>Realizar Cierre de Caja</span>
-              </button>
+              <span className="text-xs font-mono font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full self-start sm:self-auto">
+                {closures.length} cierres registrados
+              </span>
             </div>
 
             {closures.length === 0 ? (
               <div className="py-12 text-center space-y-2">
                 <Lock className="w-10 h-10 text-slate-300 mx-auto" />
-                <p className="text-sm font-bold text-slate-700">Sin cierres de caja registrados</p>
-                <p className="text-xs text-slate-400">
-                  Al pulsar "Realizar Cierre de Caja" los arqueos quedarán asentados aquí.
+                <p className="text-sm font-bold text-slate-700">Sin cierres de caja registrados aún</p>
+                <p className="text-xs text-slate-400 max-w-xs mx-auto">
+                  Al pulsar "Cerrar Caja Diaria" en la operatoria de hoy, la recaudación consolidada aparecerá aquí.
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 pt-1">
                 {closures.map((c) => {
                   const dateFormatted = formatLocalDateTime(c.createdAt || c.date);
+                  const cashColl = c.cashCollected !== undefined ? c.cashCollected : c.expectedCash;
+                  const mpColl = c.mercadoPagoCollected !== undefined ? c.mercadoPagoCollected : 0;
+                  const trColl = c.transferCollected !== undefined ? c.transferCollected : 0;
+                  const totColl = c.totalCollected !== undefined ? c.totalCollected : (c.countedCash || c.expectedCash);
 
                   return (
                     <div
                       key={c.id}
                       onClick={() => setSelectedClosureForDetail(c)}
-                      className="p-4 bg-slate-50 hover:bg-white border border-slate-200 hover:border-indigo-300 rounded-2xl space-y-2.5 shadow-2xs hover:shadow-xs transition-all cursor-pointer group"
+                      className="p-4 bg-slate-50 hover:bg-white border border-slate-200 hover:border-indigo-300 rounded-2xl space-y-3 shadow-2xs hover:shadow-xs transition-all cursor-pointer group"
                       title="Hacé clic para ver el arqueo detallado"
                     >
                       <div className="flex items-center justify-between border-b border-slate-200/80 pb-2">
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-slate-700 group-hover:text-indigo-700 font-mono transition-colors">{dateFormatted}</span>
+                          <span className="text-xs font-bold text-slate-800 group-hover:text-indigo-700 font-mono transition-colors">
+                            {dateFormatted}
+                          </span>
                           <span className="text-[10px] font-bold text-slate-600 bg-slate-200/70 px-2 py-0.5 rounded-md">
                             {getLocationName(c.locationId as any || 'aimogasta')}
                           </span>
@@ -592,7 +1138,7 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
                           </span>
                         ) : c.difference === 0 ? (
                           <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md">
-                            Exacta
+                            Arqueo Exacto
                           </span>
                         ) : c.difference > 0 ? (
                           <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md font-mono">
@@ -605,14 +1151,45 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
                         )}
                       </div>
 
+                      {/* Recaudación Consolidada */}
+                      <div className="bg-white p-2.5 rounded-xl border border-slate-200/80 space-y-1 text-xs">
+                        <div className="flex items-center justify-between font-bold">
+                          <span className="text-[10px] uppercase text-slate-500 font-extrabold">Recaudación Consolidada</span>
+                          <span className="font-mono text-slate-900">${totColl.toLocaleString('es-AR')}</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-1 text-[11px] font-mono text-slate-600 pt-1 border-t border-slate-100">
+                          <div>
+                            <span className="text-[9px] text-slate-400 block font-sans font-bold">Efectivo</span>
+                            <span>${cashColl.toLocaleString('es-AR')}</span>
+                          </div>
+                          <div>
+                            <span className="text-[9px] text-slate-400 block font-sans font-bold">Mercado Pago</span>
+                            <span>${mpColl.toLocaleString('es-AR')}</span>
+                          </div>
+                          <div>
+                            <span className="text-[9px] text-slate-400 block font-sans font-bold">Transferencia</span>
+                            <span>${trColl.toLocaleString('es-AR')}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Arqueo físico de Efectivo */}
                       <div className="grid grid-cols-2 gap-2 text-xs font-mono">
                         <div>
-                          <span className="text-[10px] font-sans text-slate-400 uppercase font-extrabold block">Esperado</span>
-                          <span className="font-bold text-slate-900">${c.expectedCash.toLocaleString('es-AR')}</span>
+                          <span className="text-[10px] font-sans text-slate-400 uppercase font-extrabold block">
+                            Efectivo Esperado
+                          </span>
+                          <span className="font-bold text-slate-900">
+                            ${c.expectedCash.toLocaleString('es-AR')}
+                          </span>
                         </div>
                         <div>
-                          <span className="text-[10px] font-sans text-slate-400 uppercase font-extrabold block">Contado</span>
-                          <span className="font-bold text-slate-900">${c.countedCash.toLocaleString('es-AR')}</span>
+                          <span className="text-[10px] font-sans text-slate-400 uppercase font-extrabold block">
+                            Efectivo Contado
+                          </span>
+                          <span className="font-bold text-slate-900">
+                            ${c.countedCash.toLocaleString('es-AR')}
+                          </span>
                         </div>
                       </div>
 
@@ -633,518 +1210,334 @@ export const CashPage: React.FC<CashPageProps> = ({ initialSubTab = 'movements' 
               </div>
             )}
           </div>
+
+          {/* EGRESOS / MOVIMIENTOS DE CAJA GENERAL */}
+          <div className="bg-white border border-slate-200 rounded-3xl shadow-2xs p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-rose-50 text-rose-600 rounded-xl">
+                  <ArrowDownRight className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-wider text-slate-900">
+                    Egresos / Movimientos de Caja General
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Pagos a proveedores, gastos desde fondos generales y movimientos de cuentas
+                  </p>
+                </div>
+              </div>
+              <span className="text-xs font-mono font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full self-start sm:self-auto">
+                {filteredGeneralMovements.length} movimientos
+              </span>
+            </div>
+
+            {/* Barra de Filtros */}
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              {/* Buscador */}
+              <div className="relative min-w-[200px] flex-1">
+                <input
+                  type="text"
+                  placeholder="Buscar concepto o proveedor..."
+                  value={genSearch}
+                  onChange={(e) => setGenSearch(e.target.value)}
+                  className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                />
+                {genSearch && (
+                  <button
+                    onClick={() => setGenSearch('')}
+                    className="absolute right-2 top-2 text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+
+              {/* Filtro Período */}
+              <div className="flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200">
+                <button
+                  onClick={() => setGenPeriodFilter('all')}
+                  className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
+                    genPeriodFilter === 'all' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  Todos
+                </button>
+                <button
+                  onClick={() => setGenPeriodFilter('today')}
+                  className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
+                    genPeriodFilter === 'today' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  Hoy
+                </button>
+                <button
+                  onClick={() => setGenPeriodFilter('month')}
+                  className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
+                    genPeriodFilter === 'month' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  Este Mes
+                </button>
+              </div>
+
+              {/* Filtro Fondo Origen */}
+              <select
+                value={genFundFilter}
+                onChange={(e) => setGenFundFilter(e.target.value as any)}
+                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="all">Fondo Origen: Todos</option>
+                <option value="caja_general">Solo Efectivo General</option>
+                <option value="mercado_pago">Solo Mercado Pago</option>
+                <option value="transfer">Solo Transferencias / Banco</option>
+              </select>
+
+              {/* Filtro Tipo */}
+              <select
+                value={genTypeFilter}
+                onChange={(e) => setGenTypeFilter(e.target.value as any)}
+                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="all">Tipo: Todos</option>
+                <option value="SUPPLIER_PAYMENT">Pagos a Proveedores</option>
+                <option value="EXPENSE">Gastos Operativos</option>
+                <option value="INTERNAL_TRANSFER">Pases Internos / Retiros</option>
+                <option value="MANUAL">Movimientos Manuales</option>
+              </select>
+            </div>
+
+            {/* Listado de Egresos de Caja General */}
+            {filteredGeneralMovements.length === 0 ? (
+              <div className="py-10 text-center space-y-2">
+                <Wallet className="w-10 h-10 text-slate-300 mx-auto" />
+                <p className="text-sm font-bold text-slate-700">Sin movimientos para los filtros seleccionados</p>
+                <p className="text-xs text-slate-400 max-w-xs mx-auto">
+                  No se encontraron egresos ni movimientos de Caja General en este período.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {filteredGeneralMovements.map((mov) => {
+                  const isIncome = mov.type === 'INCOME';
+
+                  return (
+                    <div
+                      key={mov.id}
+                      onClick={() => {
+                        if (mov.sourceType === 'SUPPLIER_PAYMENT') {
+                          setSelectedMovementForDetail(mov);
+                        } else if (mov.sourceType === 'EXPENSE') {
+                          setLinkedExpenseId(mov.sourceId);
+                        } else {
+                          setSelectedMovementForDetail(mov);
+                        }
+                      }}
+                      className="p-3.5 bg-slate-50/70 border border-slate-200/80 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-white hover:border-indigo-300 hover:shadow-xs transition-all shadow-2xs cursor-pointer group"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={`w-10 h-10 rounded-2xl shrink-0 flex items-center justify-center text-white font-black shadow-xs ${
+                            isIncome ? 'bg-emerald-600' : 'bg-rose-500'
+                          }`}
+                        >
+                          {isIncome ? <Plus className="w-5 h-5" /> : <Minus className="w-5 h-5" />}
+                        </div>
+
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-sm text-slate-900 group-hover:text-indigo-700 transition-colors">
+                              {mov.description}
+                            </span>
+                            {renderSourceBadge(mov.sourceType)}
+                            {renderFundBadge(mov)}
+                            {renderMethodBadge(mov.paymentMethod)}
+                          </div>
+
+                          <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono flex-wrap">
+                            <span>{formatLocalDateTime(mov.createdAt || mov.date)}</span>
+                            {mov.providerName && (
+                              <span className="text-slate-600 font-sans font-medium">
+                                • Proveedor: <strong>{mov.providerName}</strong>
+                              </span>
+                            )}
+                            {mov.notes && (
+                              <span className="text-slate-500 font-sans italic truncate max-w-xs">
+                                • {mov.notes}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center sm:flex-col sm:items-end justify-between gap-1 shrink-0">
+                        <p className={`text-base font-black font-mono ${isIncome ? 'text-emerald-700' : 'text-rose-600'}`}>
+                          {isIncome ? '+' : '-'}${mov.amount.toLocaleString('es-AR')}
+                        </p>
+                        <span className="text-[10px] text-slate-400 font-bold group-hover:text-indigo-600 flex items-center gap-0.5 transition-colors">
+                          <span>Ver detalle</span>
+                          <ChevronRight className="w-3 h-3" />
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      {/* SUB-TAB 1: MOVIMIENTOS & BALANCES VIEW */}
-      {activeSubTab === 'movements' && (
-        <div className="space-y-6 animate-fadeIn">
+      {/* ========================================================================= */}
+      {/* VISTA 3: GASTOS (EMBEDDED)                                                 */}
+      {/* ========================================================================= */}
+      {activeMainTab === 'expenses' && (
+        <div className="animate-fadeIn">
+          <ExpensesPage isEmbedded={true} onBackToHome={() => setActiveMainTab('caja_diaria')} />
+        </div>
+      )}
 
-          {/* ========================================================================= */}
-          {/* SECCIÓN PRINCIPAL: CAJA DIARIA vs CAJA GENERAL                            */}
-          {/* ========================================================================= */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* 1. CAJA DIARIA DEL LOCAL */}
-            <div className="p-5 bg-gradient-to-br from-emerald-900 to-slate-900 text-white rounded-3xl shadow-lg border border-emerald-700/50 flex flex-col justify-between space-y-4 relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl -mr-10 -mt-10 pointer-events-none" />
-              
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
-                      <DollarSign className="w-5 h-5 stroke-[2.5]" />
-                    </div>
-                    <div>
-                      <h2 className="text-sm font-black uppercase tracking-wider text-emerald-300">
-                        Caja Diaria (Local)
-                      </h2>
-                      <p className="text-[11px] text-slate-300">
-                        Dinero físico en cajón • Inicia en $0 cada día
-                      </p>
-                    </div>
-                  </div>
-                  <span className="text-[10px] font-extrabold px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 uppercase tracking-wider">
-                    Físico Hoy
-                  </span>
-                </div>
+      {/* Modal: Registrar Gasto Rápido */}
+      {showQuickExpenseModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-fadeIn">
+          <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col my-auto max-h-[88dvh]">
+            <div className="p-4 bg-rose-700 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
+                <Receipt className="w-5 h-5 text-rose-200" />
+                <h3 className="font-bold text-sm">Registrar Gasto</h3>
+              </div>
+              <button
+                onClick={() => setShowQuickExpenseModal(false)}
+                disabled={isSubmittingQuickExp}
+                className="p-1.5 text-rose-200 hover:text-white rounded-full transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
 
-                <div className="p-4 bg-white/10 rounded-2xl border border-white/10 backdrop-blur-xs space-y-1">
-                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-300 block">
-                    Efectivo Esperado en Caja Hoy
-                  </span>
-                  <p className="text-3xl font-black font-mono text-emerald-300 tracking-tight">
-                    ${(summary.dailyExpectedCash || 0).toLocaleString('es-AR')}
-                  </p>
-                  <p className="text-[11px] text-slate-300">
-                    ¿Cuánto efectivo debería haber físicamente ahora en el cajón?
-                  </p>
-                </div>
+            <form onSubmit={handleSaveQuickExpense} className="p-5 overflow-y-auto space-y-4 flex-1">
+              {/* Concepto / Descripción */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Concepto / Descripción <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  placeholder="Ej: Pan, bolsas, combustible, flete, etc."
+                  value={quickExpDesc}
+                  onChange={(e) => setQuickExpDesc(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 focus:bg-white focus:ring-2 focus:ring-rose-500 outline-none"
+                />
+              </div>
 
-                <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                  <div className="p-2.5 bg-black/20 rounded-xl border border-white/5 space-y-0.5">
-                    <span className="text-[10px] text-slate-400 font-bold block">Ingresos Efectivo</span>
-                    <span className="font-mono font-bold text-emerald-400">+${(summary.dailyCashIncome || 0).toLocaleString('es-AR')}</span>
-                  </div>
-                  <div className="p-2.5 bg-black/20 rounded-xl border border-white/5 space-y-0.5">
-                    <span className="text-[10px] text-slate-400 font-bold block">Egresos Efectivo</span>
-                    <span className="font-mono font-bold text-rose-400">-${(summary.dailyCashExpense || 0).toLocaleString('es-AR')}</span>
-                  </div>
-                  <div className="p-2.5 bg-black/20 rounded-xl border border-white/5 space-y-0.5">
-                    <span className="text-[10px] text-slate-400 font-bold block">Pases a C. Gral</span>
-                    <span className="font-mono font-bold text-amber-300">-${(summary.dailyTransfersToGeneral || 0).toLocaleString('es-AR')}</span>
-                  </div>
+              {/* Importe */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Importe ($) <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-2.5 font-bold text-slate-400">$</span>
+                  <NumericInput
+                    min="0.01"
+                    step="any"
+                    allowDecimal={true}
+                    required
+                    value={quickExpAmountStr}
+                    onChangeRaw={(e) => setQuickExpAmountStr(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full pl-8 pr-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-mono text-base font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-rose-500 outline-none"
+                  />
                 </div>
               </div>
 
-              <div className="pt-2 flex flex-wrap items-center gap-2 border-t border-white/10">
-                <button
-                  onClick={() => {
-                    const expected = summary.dailyExpectedCash !== undefined ? summary.dailyExpectedCash : summary.cashBalance;
-                    setCountedCashStr(expected.toString());
-                    setShowClosureModal(true);
-                  }}
-                  className="flex-1 py-2.5 px-3 bg-emerald-500 hover:bg-emerald-400 active:scale-98 text-slate-950 font-black text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5"
+              {/* Origen del dinero / Fondo pagado */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  ¿Desde qué fondo se paga? <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={quickExpPaidFrom}
+                  onChange={(e) => setQuickExpPaidFrom(e.target.value as ExpensePaidFrom)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-rose-500 outline-none"
                 >
-                  <Lock className="w-3.5 h-3.5 stroke-[2.5]" />
-                  <span>Cerrar Caja Diaria (Arqueo)</span>
+                  <option value="caja_diaria">Caja Diaria (Cajón físico del local)</option>
+                  <option value="caja_general">Caja General (Recaudación acumulada / Caja fuerte)</option>
+                  <option value="mercado_pago">Mercado Pago (Cuenta digital)</option>
+                  <option value="transfer">Transferencia / Banco</option>
+                </select>
+                <p className="text-[10px] text-slate-500 mt-1">
+                  {quickExpPaidFrom === 'caja_diaria'
+                    ? '⚠️ Se descontará del Efectivo Esperado en el cajón de hoy.'
+                    : '✅ Se paga con fondos generales o cuentas digitales. NO descuenta del cajón físico.'}
+                </p>
+              </div>
+
+              {/* Categoría */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Categoría
+                </label>
+                <select
+                  value={quickExpCategory}
+                  onChange={(e) => setQuickExpCategory(e.target.value as ExpenseCategory)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:ring-2 focus:ring-rose-500 outline-none"
+                >
+                  {EXPENSE_CATEGORIES.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Observaciones */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Observaciones <span className="text-slate-400 font-normal">(opcional)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Detalles adicionales o comprobante..."
+                  value={quickExpNotes}
+                  onChange={(e) => setQuickExpNotes(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:ring-2 focus:ring-rose-500 outline-none"
+                />
+              </div>
+
+              {/* Modal Actions */}
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowQuickExpenseModal(false)}
+                  disabled={isSubmittingQuickExp}
+                  className="px-4 py-2.5 border border-slate-300 hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-xl"
+                >
+                  Cancelar
                 </button>
                 <button
-                  onClick={() => setShowTransferToGeneralModal(true)}
-                  className="py-2.5 px-3 bg-white/15 hover:bg-white/25 active:scale-98 text-white font-bold text-xs rounded-xl transition-all border border-white/20 flex items-center justify-center gap-1.5 shrink-0"
-                  title="Pasar recaudación del día a la Caja General"
+                  type="submit"
+                  disabled={isSubmittingQuickExp}
+                  className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5"
                 >
-                  <ArrowUpRight className="w-3.5 h-3.5 text-emerald-300" />
-                  <span>Retirar a Caja General</span>
+                  {isSubmittingQuickExp ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Guardando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Registrar Gasto</span>
+                    </>
+                  )}
                 </button>
               </div>
-            </div>
-
-            {/* 2. CAJA GENERAL (ACUMULATIVA) */}
-            <div className="p-5 bg-white border border-slate-200 rounded-3xl shadow-sm flex flex-col justify-between space-y-4">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-200">
-                      <Building2 className="w-5 h-5 stroke-[2.2]" />
-                    </div>
-                    <div>
-                      <h2 className="text-sm font-black uppercase tracking-wider text-slate-900">
-                        Caja General
-                      </h2>
-                      <p className="text-[11px] text-slate-500">
-                        Recaudación general acumulativa y reservas
-                      </p>
-                    </div>
-                  </div>
-                  <span className="text-[10px] font-extrabold px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 uppercase tracking-wider">
-                    Acumulado
-                  </span>
-                </div>
-
-                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/90 space-y-1">
-                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block">
-                    Total Disponible (Todos los fondos)
-                  </span>
-                  <p className="text-3xl font-black font-mono text-slate-900 tracking-tight">
-                    ${(summary.totalBalance || 0).toLocaleString('es-AR')}
-                  </p>
-                  <p className="text-[11px] text-slate-500">
-                    Suma consolidada de efectivo general, cuentas digitales y bancos
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
-                  <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 space-y-0.5">
-                    <span className="text-[9px] uppercase font-extrabold text-slate-400 block">Efectivo General</span>
-                    <span className="font-mono font-black text-slate-900 block text-xs truncate">
-                      ${(summary.cajaGeneralBalance || 0).toLocaleString('es-AR')}
-                    </span>
-                    <span className="text-[9px] text-slate-400">Fondos / Caja fuerte</span>
-                  </div>
-
-                  <div className="p-2.5 bg-sky-50/60 rounded-xl border border-sky-100 space-y-0.5">
-                    <span className="text-[9px] uppercase font-extrabold text-sky-700 block">Mercado Pago</span>
-                    <span className="font-mono font-black text-sky-800 block text-xs truncate">
-                      ${(summary.mercadoPagoBalance || 0).toLocaleString('es-AR')}
-                    </span>
-                    <span className="text-[9px] text-sky-600/80">Saldo disponible MP</span>
-                  </div>
-
-                  <div className="p-2.5 bg-indigo-50/60 rounded-xl border border-indigo-100 space-y-0.5 col-span-2 sm:col-span-1">
-                    <span className="text-[9px] uppercase font-extrabold text-indigo-700 block">Transferencias / Bancos</span>
-                    <span className="font-mono font-black text-indigo-800 block text-xs truncate">
-                      ${(summary.transferBalance || 0).toLocaleString('es-AR')}
-                    </span>
-                    <span className="text-[9px] text-indigo-600/80">Cuentas bancarias</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-2 flex items-center justify-between gap-2 border-t border-slate-100">
-                <span className="text-[11px] text-slate-400">
-                  Retiros de ganancias y movimientos de fondos
-                </span>
-                <button
-                  onClick={() => setShowGeneralMovementModal(true)}
-                  className="py-2.5 px-3 bg-slate-900 hover:bg-slate-800 active:scale-98 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 shrink-0"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>+ Movimiento Caja General</span>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Main Balances Grid (Balance del Día) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-        {/* Efectivo Hoy */}
-        <div className="p-4 bg-white border border-slate-200 rounded-3xl shadow-2xs space-y-2 relative overflow-hidden group hover:border-emerald-300 transition-colors">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500">Efectivo Hoy</span>
-            <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
-              <DollarSign className="w-4 h-4" />
-            </div>
-          </div>
-          <div>
-            <p className="text-2xl font-black font-mono text-emerald-700">
-              {summary.todayCash >= 0 ? '+' : ''}${summary.todayCash.toLocaleString('es-AR')}
-            </p>
-            <p className="text-[11px] text-slate-400 mt-0.5">Dinero neto en efectivo del día</p>
+            </form>
           </div>
         </div>
-
-        {/* Mercado Pago Hoy */}
-        <div className="p-4 bg-white border border-slate-200 rounded-3xl shadow-2xs space-y-2 relative overflow-hidden group hover:border-sky-300 transition-colors">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500">Mercado Pago Hoy</span>
-            <div className="w-8 h-8 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center font-bold">
-              <Smartphone className="w-4 h-4" />
-            </div>
-          </div>
-          <div>
-            <p className="text-2xl font-black font-mono text-sky-700">
-              {summary.todayMercadoPago >= 0 ? '+' : ''}${summary.todayMercadoPago.toLocaleString('es-AR')}
-            </p>
-            <p className="text-[11px] text-slate-400 mt-0.5">Dinero neto digital MP del día</p>
-          </div>
-        </div>
-
-        {/* Transferencias Hoy */}
-        <div className="p-4 bg-white border border-slate-200 rounded-3xl shadow-2xs space-y-2 relative overflow-hidden group hover:border-indigo-300 transition-colors">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500">Transferencias Hoy</span>
-            <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
-              <Building2 className="w-4 h-4" />
-            </div>
-          </div>
-          <div>
-            <p className="text-2xl font-black font-mono text-indigo-700">
-              {summary.todayTransfer >= 0 ? '+' : ''}${summary.todayTransfer.toLocaleString('es-AR')}
-            </p>
-            <p className="text-[11px] text-slate-400 mt-0.5">Dinero neto transferencias del día</p>
-          </div>
-        </div>
-
-        {/* Balance del Día */}
-        <div className="p-4 bg-slate-900 text-white rounded-3xl shadow-md space-y-2 relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Balance del Día</span>
-            <div className="w-8 h-8 rounded-xl bg-white/10 text-emerald-400 flex items-center justify-center font-bold">
-              <PieChart className="w-4 h-4" />
-            </div>
-          </div>
-          <div>
-            <p className="text-2xl font-black font-mono text-white">
-              {summary.todayNet >= 0 ? '+' : ''}${summary.todayNet.toLocaleString('es-AR')}
-            </p>
-            <p className="text-[11px] text-slate-400 mt-0.5">Movimiento financiero neto del día</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Panel discreto de consulta: Saldos Acumulados Históricos (para Arqueo de Caja) */}
-      <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 space-y-2">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <button
-            type="button"
-            onClick={() => setShowHistoricalBalances(!showHistoricalBalances)}
-            className="text-xs font-bold text-slate-600 hover:text-slate-900 flex items-center gap-1.5 transition-colors self-start"
-          >
-            <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${showHistoricalBalances ? 'rotate-180' : ''}`} />
-            <span>{showHistoricalBalances ? 'Ocultar saldos acumulados de caja' : 'Ver saldos acumulados de caja (para arqueos y cierres)'}</span>
-          </button>
-          <div className="text-[11px] font-mono text-slate-500 font-medium">
-            Saldo acumulado total: <strong className="text-slate-800">${summary.totalBalance.toLocaleString('es-AR')}</strong>
-          </div>
-        </div>
-
-        {showHistoricalBalances && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-2.5 border-t border-slate-200/70 animate-fadeIn text-xs">
-            <div className="p-3 bg-white border border-slate-200 rounded-xl space-y-0.5">
-              <span className="text-[10px] uppercase font-bold text-slate-400 block">Efectivo Acumulado</span>
-              <span className="text-sm font-black font-mono text-emerald-700">${summary.cashBalance.toLocaleString('es-AR')}</span>
-              <p className="text-[10px] text-slate-400">Caja física esperada</p>
-            </div>
-            <div className="p-3 bg-white border border-slate-200 rounded-xl space-y-0.5">
-              <span className="text-[10px] uppercase font-bold text-slate-400 block">Mercado Pago Acumulado</span>
-              <span className="text-sm font-black font-mono text-sky-700">${summary.mercadoPagoBalance.toLocaleString('es-AR')}</span>
-              <p className="text-[10px] text-slate-400">Cuenta digital MP</p>
-            </div>
-            <div className="p-3 bg-white border border-slate-200 rounded-xl space-y-0.5">
-              <span className="text-[10px] uppercase font-bold text-slate-400 block">Transferencias Acumuladas</span>
-              <span className="text-sm font-black font-mono text-indigo-700">${summary.transferBalance.toLocaleString('es-AR')}</span>
-              <p className="text-[10px] text-slate-400">Banco / Cuentas digitales</p>
-            </div>
-            <div className="p-3 bg-white border border-slate-200 rounded-xl space-y-0.5">
-              <span className="text-[10px] uppercase font-bold text-slate-400 block">Saldo Total Acumulado</span>
-              <span className="text-sm font-black font-mono text-slate-900">${summary.totalBalance.toLocaleString('es-AR')}</span>
-              <p className="text-[10px] text-slate-400">Todos los medios</p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Today's Summary Card */}
-      <div className="p-5 bg-white border border-slate-200 rounded-3xl shadow-2xs space-y-3">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-          <div className="flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-emerald-600" />
-            <h2 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">Resumen del Día (Hoy)</h2>
-          </div>
-          <span className="text-xs font-bold text-slate-400 font-mono">
-            {formatLocalDate(getArgentinaToday())}
-          </span>
-        </div>
-
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 text-center">
-          <div className="p-3 bg-blue-50/70 border border-blue-100 rounded-2xl space-y-1">
-            <p className="text-[10px] font-extrabold uppercase tracking-wider text-blue-800 flex items-center justify-center gap-1">
-              <Store className="w-3.5 h-3.5 text-blue-600" /> Ventas Hoy
-            </p>
-            <p className="text-lg font-black font-mono text-blue-700">
-              ${summary.todaySales.toLocaleString('es-AR')}
-            </p>
-            <p className="text-[10px] text-blue-600/80 font-medium">Actividad comercial</p>
-          </div>
-
-          <div className="p-3 bg-emerald-50/70 border border-emerald-100 rounded-2xl space-y-1">
-            <p className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-800 flex items-center justify-center gap-1">
-              <ArrowUpRight className="w-3.5 h-3.5 text-emerald-600" /> Ingresos Hoy
-            </p>
-            <p className="text-lg font-black font-mono text-emerald-700">
-              +${summary.todayIncome.toLocaleString('es-AR')}
-            </p>
-            <p className="text-[10px] text-emerald-600/80 font-medium">Dinero ingresado</p>
-          </div>
-
-          <div className="p-3 bg-rose-50/70 border border-rose-100 rounded-2xl space-y-1">
-            <p className="text-[10px] font-extrabold uppercase tracking-wider text-rose-800 flex items-center justify-center gap-1">
-              <ArrowDownRight className="w-3.5 h-3.5 text-rose-600" /> Egresos Hoy
-            </p>
-            <p className="text-lg font-black font-mono text-rose-700">
-              -${summary.todayExpense.toLocaleString('es-AR')}
-            </p>
-            <p className="text-[10px] text-rose-600/80 font-medium">Gastos operativos</p>
-          </div>
-
-          <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-1">
-            <p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
-              Flujo Neto Hoy
-            </p>
-            <p className={`text-lg font-black font-mono ${summary.todayNet >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
-              {summary.todayNet >= 0 ? '+' : ''}${summary.todayNet.toLocaleString('es-AR')}
-            </p>
-            <p className="text-[10px] text-slate-500 font-medium">Balance en caja</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Filter and Movement History Section */}
-      <div className="bg-white border border-slate-200 rounded-3xl shadow-2xs p-5 space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
-          <div className="flex items-center gap-2">
-            <History className="w-5 h-5 text-slate-700" />
-            <h2 className="text-sm font-bold text-slate-900">Historial de Movimientos</h2>
-            <span className="text-xs font-mono font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
-              {filteredMovements.length}
-            </span>
-          </div>
-
-          <button
-            onClick={() => setShowClosureHistory(true)}
-            className="text-xs font-bold text-indigo-600 hover:text-indigo-800 hover:underline flex items-center gap-1 self-start sm:self-auto"
-          >
-            <Lock className="w-3.5 h-3.5" />
-            <span>Ver Arqueos / Cierres Previos ({closures.length})</span>
-          </button>
-        </div>
-
-        {/* Filter Toolbar */}
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          {/* Period filter */}
-          <div className="flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200">
-            <button
-              onClick={() => setPeriodFilter('today')}
-              className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
-                periodFilter === 'today' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Hoy
-            </button>
-            <button
-              onClick={() => setPeriodFilter('yesterday')}
-              className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
-                periodFilter === 'yesterday' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Ayer
-            </button>
-            <button
-              onClick={() => setPeriodFilter('week')}
-              className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
-                periodFilter === 'week' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Esta Semana
-            </button>
-            <button
-              onClick={() => setPeriodFilter('month')}
-              className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
-                periodFilter === 'month' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Este Mes
-            </button>
-            <button
-              onClick={() => setPeriodFilter('all')}
-              className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
-                periodFilter === 'all' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Todos
-            </button>
-          </div>
-
-          {/* Payment Method filter dropdown */}
-          <select
-            value={methodFilter}
-            onChange={(e) => setMethodFilter(e.target.value)}
-            className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-2xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500"
-          >
-            <option value="all">Medio: Todos</option>
-            <option value="cash">Efectivo</option>
-            <option value="mercado_pago">Mercado Pago</option>
-            <option value="transfer">Transferencia</option>
-            <option value="credit">Fiado / Cta. Cte.</option>
-            <option value="other">Otro</option>
-          </select>
-
-          {/* Type filter dropdown */}
-          <select
-            value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value)}
-            className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-2xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500"
-          >
-            <option value="all">Tipo: Todos</option>
-            <option value="INCOME">Solo Ingresos (+)</option>
-            <option value="EXPENSE">Solo Egresos (-)</option>
-            <option value="CREDIT">Solo Fiados (Cta. Cte.)</option>
-          </select>
-        </div>
-
-        {/* Movements List Table */}
-        {loading ? (
-          <div className="py-12 flex flex-col items-center justify-center space-y-2">
-            <Loader2 className="w-8 h-8 text-emerald-600 animate-spin" />
-            <p className="text-xs font-semibold text-slate-500">Cargando movimientos de caja...</p>
-          </div>
-        ) : filteredMovements.length === 0 ? (
-          <div className="py-12 text-center space-y-2">
-            <Wallet className="w-10 h-10 text-slate-300 mx-auto" />
-            <p className="text-sm font-bold text-slate-700">Sin movimientos para el filtro seleccionado</p>
-            <p className="text-xs text-slate-400 max-w-xs mx-auto">
-              Probá cambiar el periodo o registrar un nuevo movimiento de caja.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {filteredMovements.map((mov) => {
-              const isIncome = mov.type === 'INCOME';
-              const isFiado = mov.paymentMethod === 'credit';
-
-              return (
-                <div
-                  key={mov.id}
-                  onClick={() => {
-                    if (mov.sourceType === 'SALE') {
-                      setLinkedSaleId(mov.sourceId);
-                    } else if (mov.sourceType === 'CUSTOMER_PAYMENT') {
-                      setLinkedPaymentId(mov.sourceId);
-                    } else {
-                      setSelectedMovementForDetail(mov);
-                    }
-                  }}
-                  className="p-3.5 bg-slate-50/70 border border-slate-200/80 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-white hover:border-emerald-300 hover:shadow-xs transition-all shadow-2xs cursor-pointer group"
-                  title="Hacé clic para ver el detalle completo de este movimiento"
-                >
-                  <div className="flex items-center gap-3">
-                    {/* Icon indicator */}
-                    {isFiado ? (
-                      <div className="w-10 h-10 rounded-2xl shrink-0 flex items-center justify-center text-amber-800 bg-amber-100/90 border border-amber-200 shadow-xs font-black">
-                        <Receipt className="w-5 h-5 text-amber-700" />
-                      </div>
-                    ) : (
-                      <div
-                        className={`w-10 h-10 rounded-2xl shrink-0 flex items-center justify-center text-white font-black shadow-xs ${
-                          isIncome ? 'bg-emerald-600' : 'bg-rose-500'
-                        }`}
-                      >
-                        {isIncome ? <Plus className="w-5 h-5" /> : <Minus className="w-5 h-5" />}
-                      </div>
-                    )}
-
-                    <div className="space-y-0.5">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-bold text-sm text-slate-900 group-hover:text-emerald-700 transition-colors">{mov.description}</span>
-                        {renderSourceBadge(mov.sourceType)}
-                        {renderMethodBadge(mov.paymentMethod)}
-                      </div>
-
-                      <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono">
-                        <span>{formatLocalDateTime(mov.createdAt || mov.date)}</span>
-                        {mov.notes && <span>• {mov.notes}</span>}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center sm:flex-col sm:items-end justify-between gap-1 shrink-0">
-                    {isFiado ? (
-                      <div className="text-right">
-                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 block sm:inline-block">
-                          FIADO (Sin ingreso)
-                        </span>
-                        <p className="text-base font-black font-mono text-slate-700 sm:mt-0.5">
-                          ${mov.amount.toLocaleString('es-AR')}
-                        </p>
-                      </div>
-                    ) : (
-                      <p className={`text-base font-black font-mono ${isIncome ? 'text-emerald-700' : 'text-rose-600'}`}>
-                        {isIncome ? '+' : '-'}${mov.amount.toLocaleString('es-AR')}
-                      </p>
-                    )}
-                    <span className="text-[10px] text-slate-400 font-bold group-hover:text-emerald-600 flex items-center gap-0.5 transition-colors">
-                      <span>Ver detalle</span>
-                      <ChevronRight className="w-3 h-3" />
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  )}
+      )}
 
       {/* Modal 1: + Movimiento Manual */}
       {showManualModal && (

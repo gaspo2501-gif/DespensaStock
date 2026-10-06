@@ -13,11 +13,12 @@ import {
   User,
   ShoppingBag,
   Ban,
-  Info
+  Info,
+  Wallet
 } from 'lucide-react';
 import { CashMovement } from '../../types/cash';
 import { getLocationName } from '../../types/location';
-import { cashService } from '../../services/firebase/cashService';
+import { cashService, resolveMovementFund } from '../../services/firebase/cashService';
 import { CancelOperationModal } from './CancelOperationModal';
 import { formatLocalDateTime, formatLocalDate } from '../../utils/dateUtils';
 
@@ -282,13 +283,42 @@ export const CashMovementDetailModal: React.FC<CashMovementDetailModalProps> = (
               </div>
             </div>
 
-            {/* Payment Method */}
-            <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200/70 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <CreditCard className="w-4 h-4 text-indigo-600 shrink-0" />
-                <div>
-                  <span className="text-[10px] uppercase font-black text-slate-400 block">Medio de Pago</span>
-                  <div className="mt-0.5">{getPaymentMethodBadge(movement.paymentMethod)}</div>
+            {/* Payment Method & Money Fund */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200/70 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <CreditCard className="w-4 h-4 text-indigo-600 shrink-0" />
+                  <div>
+                    <span className="text-[10px] uppercase font-black text-slate-400 block">Medio de Pago</span>
+                    <div className="mt-0.5">{getPaymentMethodBadge(movement.paymentMethod)}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200/70 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <Wallet className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <div>
+                    <span className="text-[10px] uppercase font-black text-slate-400 block">Fondo de Dinero</span>
+                    <div className="mt-0.5">
+                      {(() => {
+                        const f = resolveMovementFund(movement);
+                        if (f === 'caja_general') {
+                          return <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">🏦 Caja General</span>;
+                        }
+                        if (f === 'caja_diaria') {
+                          return <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">💵 Caja Diaria</span>;
+                        }
+                        if (f === 'mercado_pago') {
+                          return <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full bg-sky-50 text-sky-700 border border-sky-200">📱 Mercado Pago</span>;
+                        }
+                        if (f === 'transfer') {
+                          return <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">🏦 Transferencia</span>;
+                        }
+                        return <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200">Otro</span>;
+                      })()}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

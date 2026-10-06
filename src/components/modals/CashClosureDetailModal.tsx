@@ -156,6 +156,33 @@ export const CashClosureDetailModal: React.FC<CashClosureDetailModalProps> = ({
           </div>
 
           {/* Additional breakdowns if present in closure */}
+          {(closure.totalCollected !== undefined && closure.totalCollected > 0) && (
+            <div className="p-3.5 bg-indigo-50/70 border border-indigo-200 rounded-2xl space-y-2 text-xs">
+              <span className="text-[10px] uppercase font-black text-indigo-900 block tracking-wider">
+                Recaudación Consolidada en Caja General
+              </span>
+              <div className="grid grid-cols-3 gap-2 text-center pt-0.5">
+                <div className="p-2 bg-white rounded-xl border border-indigo-100 shadow-2xs">
+                  <span className="text-[9px] text-slate-400 font-bold block uppercase">Efectivo</span>
+                  <span className="font-mono font-bold text-emerald-700 text-xs">${(closure.cashCollected || 0).toLocaleString('es-AR')}</span>
+                </div>
+                <div className="p-2 bg-white rounded-xl border border-indigo-100 shadow-2xs">
+                  <span className="text-[9px] text-slate-400 font-bold block uppercase">Mercado Pago</span>
+                  <span className="font-mono font-bold text-sky-700 text-xs">${(closure.mercadoPagoCollected || 0).toLocaleString('es-AR')}</span>
+                </div>
+                <div className="p-2 bg-white rounded-xl border border-indigo-100 shadow-2xs">
+                  <span className="text-[9px] text-slate-400 font-bold block uppercase">Transferencia</span>
+                  <span className="font-mono font-bold text-indigo-700 text-xs">${(closure.transferCollected || 0).toLocaleString('es-AR')}</span>
+                </div>
+              </div>
+              <div className="pt-1 flex items-center justify-between text-indigo-950 font-bold text-xs border-t border-indigo-100/80">
+                <span>Total Consolidado:</span>
+                <span className="font-mono text-sm">${(closure.totalCollected || 0).toLocaleString('es-AR')}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Operational breakdown if recorded in extra */}
           {(extra.initialBalance !== undefined || extra.incomes !== undefined || extra.expenses !== undefined) && (
             <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-1.5 text-xs">
               <span className="text-[10px] uppercase font-black text-slate-400 block">Desglose Operativo Registrado</span>

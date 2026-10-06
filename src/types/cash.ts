@@ -48,6 +48,10 @@ export interface CashClosure {
   status?: 'ACTIVE' | 'CANCELLED';
   cancelledAt?: string;
   cancellationReason?: string;
+  cashCollected?: number;
+  mercadoPagoCollected?: number;
+  transferCollected?: number;
+  totalCollected?: number;
 }
 
 export interface CashBalanceSummary {
