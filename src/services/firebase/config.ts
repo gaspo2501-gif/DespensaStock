@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
-import { initializeFirestore, getFirestore, Firestore } from 'firebase/firestore';
+import { initializeFirestore, getFirestore, Firestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore';
 
 interface FirebaseConfig {
   apiKey: string;
@@ -37,8 +37,11 @@ const dbId = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatab
 
 let db: Firestore;
 try {
+  // Caché persistente en el equipo: permite seguir vendiendo sin internet.
+  // Lo cargado sin conexión queda guardado en el navegador y se sube solo al volver la conexión.
   db = initializeFirestore(app, {
     experimentalAutoDetectLongPolling: true,
+    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
   }, dbId || '(default)');
 } catch (e) {
   console.warn('initializeFirestore fallback to getFirestore:', e);

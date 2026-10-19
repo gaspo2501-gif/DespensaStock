@@ -1,0 +1,26 @@
+name: Verificar compilación (sin publicar)
+
+# Compila la app en cualquier rama que NO sea main.
+# No publica nada: sirve para comprobar que la versión nueva compila antes de pasarla a main.
+on:
+  push:
+    branches-ignore:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install
+      - name: Compilar como en GitHub Pages
+        run: npm run build
+        env:
+          GITHUB_PAGES: 'true'
