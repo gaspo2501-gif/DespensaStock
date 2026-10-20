@@ -9,7 +9,7 @@
  * - Si Firestore rechaza una escritura con conexión, el error llega a la pantalla (no se muestra "guardado").
  */
 import {
-  collection, doc, getDocs, increment, query, runTransaction, serverTimestamp, updateDoc, where, writeBatch, setDoc,
+  collection, deleteField, doc, getDocs, increment, query, runTransaction, serverTimestamp, updateDoc, where, writeBatch, setDoc,
 } from 'firebase/firestore';
 import { db } from '../services/firebase/config';
 import { getArgentinaToday } from '../utils/dateUtils';
@@ -129,6 +129,70 @@ export async function cancelSale(saleId: string, reason: string) {
   if (!reason.trim()) throw new UserError('Escribí el motivo de la anulación.');
   await salesService.cancelSale(saleId, reason); // misma lógica atómica de la app anterior
   return true;
+}
+
+/**
+ * Corrige la forma de pago de una venta ya registrada (por ejemplo, se cargó en efectivo y era Mercado Pago).
+ * No toca el stock ni los productos. Las cajas se recalculan solas porque se derivan de la venta.
+ * Si la venta tenía fiado, se anula esa deuda; si la nueva forma tiene fiado, se crea la deuda nueva.
+ * Queda guardado el historial del cambio en la propia venta (paymentHistory).
+ */
+export async function changeSalePayment(args: { saleId: string; pay: Pay; customer?: Customer; reason?: string; customerBalance?: number }) {
+  const { saleId, pay, customer, reason } = args;
+  if (!isOnline()) throw new UserError('Para cambiar la forma de pago hace falta conexión.');
+  if (pay.credit > 0 && !customer) throw new UserError('Elegí el cliente a cuyo nombre queda el fiado.');
+  const [debtSnap, cashSnap] = await Promise.all([
+    getDocs(query(collection(db, 'account_movements'), where('saleId', '==', saleId))),
+    getDocs(query(collection(db, 'cash_movements'), where('sourceId', '==', saleId))),
+  ]);
+  const iso = nowIso();
+  const why = (reason || '').trim() || 'Cambio de forma de pago';
+  let summary = '';
+  await runTransaction(db, async (tx: any) => {
+    const ref = doc(db, 'sales', saleId);
+    const s = await tx.get(ref);
+    if (!s.exists()) throw new UserError('No se encontró la venta.');
+    const d = s.data();
+    if (d.status === 'CANCELLED') throw new UserError('La venta está anulada.');
+    const total = Number(d.totalAmount) || 0;
+    if (Math.abs(payTotal(pay) - total) >= 1) throw new UserError('Las partes del pago tienen que sumar el total de la venta.');
+    const debts: any[] = [];
+    for (const m of debtSnap.docs) { const x = await tx.get(m.ref); if (x.exists() && x.data().type === 'DEBT' && x.data().status !== 'CANCELLED') debts.push(x); }
+    const cash: any[] = [];
+    for (const m of cashSnap.docs) { const x = await tx.get(m.ref); if (x.exists() && x.data().sourceType === 'SALE' && x.data().status !== 'CANCELLED') cash.push(x); }
+    const oldCredit = debts.reduce((t, x) => t + (Number(x.data().amount) || 0), 0);
+    const oldCustomer = d.customerId || (debts[0] && debts[0].data().customerId);
+    // No permitir quitar un fiado que el cliente ya empezó a pagar (quedaría saldo a favor sin control).
+    if (oldCredit > 0 && typeof args.customerBalance === 'number') {
+      const sameCustomer = customer && customer.id === oldCustomer;
+      const stays = sameCustomer ? pay.credit : 0;
+      if (args.customerBalance - oldCredit + stays < -0.5) throw new UserError('No se puede quitar ese fiado: el cliente ya pagó parte de la deuda. Registralo como un cobro.');
+    }
+    const method = saleMethodFor(pay);
+    const before = { paymentMethod: d.paymentMethod || 'cash', paymentBreakdown: d.paymentBreakdown || null, customerId: d.customerId || null };
+    const after = { paymentMethod: method, paymentBreakdown: method === 'mixed' ? { cash: pay.cash, mercado_pago: pay.mp, transfer: pay.transfer, credit: pay.credit } : null, customerId: pay.credit > 0 && customer ? customer.id : null };
+    const upd: Record<string, any> = {
+      paymentMethod: method,
+      paymentBreakdown: method === 'mixed' ? after.paymentBreakdown : deleteField(),
+      paymentHistory: [...(Array.isArray(d.paymentHistory) ? d.paymentHistory : []), { changedAtIso: iso, reason: why, before, after }],
+      updatedAt: ts(),
+    };
+    if (pay.credit > 0 && customer) { upd.customerId = customer.id; upd.customerName = customer.name; }
+    else { upd.customerId = deleteField(); upd.customerName = deleteField(); }
+    tx.update(ref, upd);
+    const cancel = { status: 'CANCELLED', cancelledAt: ts(), cancelledAtIso: iso, cancellationReason: why };
+    for (const x of debts) tx.update(x.ref, cancel);
+    for (const x of cash) tx.update(x.ref, cancel); // registros de caja viejos de esta venta (la app nueva no los usa)
+    if (pay.credit > 0 && customer) {
+      const id = `mov_debt_${Date.now()}_${rnd()}`;
+      tx.set(doc(db, 'account_movements', id), {
+        id, customerId: customer.id, type: 'DEBT', amount: pay.credit, description: method === 'credit' ? 'Venta fiada' : 'Venta fiada (pago combinado)',
+        saleId, locationId: d.locationId || 'aimogasta', createdAtIso: d.createdAtIso || iso, createdAt: d.createdAt || ts(), notes: 'Por cambio de forma de pago',
+      });
+    }
+    summary = method;
+  });
+  return summary || 'ok';
 }
 
 /* ============================ CLIENTES ============================ */
