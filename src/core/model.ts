@@ -78,6 +78,8 @@ export interface Sale {
   customerName?: string;
   status: Status;
   cancellationReason?: string;
+  /** Correcciones de forma de pago hechas después de la venta. */
+  paymentChanges?: { at: string; reason: string }[];
 }
 
 export interface AccMov {
