@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { Loc, LOCS, Pay } from '../core/model';
+import { Loc, LOCS, otherLoc, Pay } from '../core/model';
 import { money } from '../core/calc';
-import { UserError } from '../data/ops';
+import { changeRecordLocation, UserError } from '../data/ops';
 
 /* ---------------- Íconos (SVG propios, sin dependencias) ---------------- */
 const PATHS: Record<string, string> = {
@@ -125,3 +125,17 @@ export async function copyText(text: string, toast: (m: string, k?: any) => void
   try { await navigator.clipboard.writeText(text); toast('Copiado. Pegalo en WhatsApp.'); }
   catch { window.prompt('Copiá este texto:', text); }
 }
+
+/** Botón en dos pasos para pasar un gasto o un cobro a la otra sucursal. */
+export const MoveLocButton: React.FC<{ col: 'expenses' | 'account_movements'; id: string; loc: Loc }> = ({ col, id, loc }) => {
+  const { run, busy } = useRun();
+  const [ask, setAsk] = useState(false);
+  const to = otherLoc(loc);
+  if (!ask) return <button className="ds-btn ghost sm" onClick={(e) => { e.stopPropagation(); setAsk(true); }}>Pasar a {LOCS[to]}</button>;
+  return (
+    <span className="ds-row" style={{ gap: 4, display: 'inline-flex' }} onClick={(e) => e.stopPropagation()}>
+      <button className="ds-btn sm pri" disabled={busy} onClick={() => run(() => changeRecordLocation(col, id, to), () => 'Pasado a ' + LOCS[to] + '.').then(() => setAsk(false))}>Confirmar</button>
+      <button className="ds-btn ghost sm" onClick={() => setAsk(false)}>No</button>
+    </span>
+  );
+};

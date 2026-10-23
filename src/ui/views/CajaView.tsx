@@ -3,7 +3,7 @@ import { Closure, Fund, FUND_LABEL, Loc, LOCS, LOC_IDS, PAY_FUNDS } from '../../
 import { dayCash, fdate, fdateL, generalCash, money, parseAmount, today } from '../../core/calc';
 import { useData } from '../../data/DataContext';
 import { cancelClosure, cancelExpense, closeCash, createExpense, setExpenseFund, setRecordLocation, UserError } from '../../data/ops';
-import { AmountInput, Kpi, LocName, Modal, useRun } from '../common';
+import { AmountInput, Kpi, LocName, Modal, MoveLocButton, useRun } from '../common';
 import { SaleDetailModal } from '../SaleDetail';
 import type { ShellApi } from '../Shell';
 
@@ -51,11 +51,11 @@ const CajaHoy: React.FC<{ loc: Loc; onSale: (id: string) => void; onClosure: (id
     const o: Op[] = [];
     for (const s of data.sales) if (s.loc === loc && s.date === T) o.push({ t: s.time, sort: s.createdAt, kind: 'Venta', det: s.items.map((i) => i.qty + '× ' + i.name).join(', ') + (s.customerName && s.pay.credit ? ' · ' + s.customerName : ''), cash: s.pay.cash, mp: s.pay.mp + s.pay.transfer, fi: s.pay.credit, cancel: s.status === 'CANCELLED', sale: s.id });
     for (const a of data.acc) if (a.type === 'PAYMENT' && a.loc === loc && a.date === T) o.push({ t: a.time, sort: a.createdAt, kind: 'Cobro de fiado', det: custName.get(a.customerId) || 'Cliente', cash: a.pay.cash, mp: a.pay.mp + a.pay.transfer, fi: -a.amount, cancel: a.status === 'CANCELLED' });
-    for (const e of data.expenses) if (e.loc === loc && e.date === T && (e.fund === 'caja_diaria' || e.fund === 'mercado_pago')) o.push({ t: '', sort: e.createdAt, kind: 'Gasto', det: e.category + ': ' + e.description, cash: e.fund === 'caja_diaria' ? -e.amount : 0, mp: e.fund === 'mercado_pago' ? -e.amount : 0, fi: 0, cancel: e.status === 'CANCELLED' });
-    for (const p of data.spays) if (p.loc === loc && p.date === T && (p.fund === 'caja_diaria' || p.fund === 'mercado_pago')) o.push({ t: '', sort: p.createdAt, kind: 'Pago a proveedor', det: p.providerName, cash: p.fund === 'caja_diaria' ? -p.amount : 0, mp: p.fund === 'mercado_pago' ? -p.amount : 0, fi: 0, cancel: p.status === 'CANCELLED' });
+    for (const e of data.expenses) if (e.loc === loc && e.date === T && e.fund === 'caja_diaria') o.push({ t: '', sort: e.createdAt, kind: 'Gasto', det: e.category + ': ' + e.description, cash: -e.amount, mp: 0, fi: 0, cancel: e.status === 'CANCELLED' });
+    for (const p of data.spays) if (p.loc === loc && p.date === T && p.fund === 'caja_diaria') o.push({ t: '', sort: p.createdAt, kind: 'Pago a proveedor', det: p.providerName, cash: -p.amount, mp: 0, fi: 0, cancel: p.status === 'CANCELLED' });
     for (const m of data.cashMovs) if (m.loc === loc && m.date === T) {
       if (m.sourceType === 'INTERNAL_TRANSFER') { if (!m.closureId) o.push({ t: m.time, sort: m.createdAt, kind: 'Pase a caja general', det: m.description, cash: -m.amount, mp: 0, fi: 0, cancel: m.status === 'CANCELLED' }); }
-      else if (m.fund === 'caja_diaria' || m.fund === 'mercado_pago') { const v = m.type === 'INCOME' ? m.amount : -m.amount; o.push({ t: m.time, sort: m.createdAt, kind: 'Movimiento manual', det: m.description, cash: m.fund === 'caja_diaria' ? v : 0, mp: m.fund === 'mercado_pago' ? v : 0, fi: 0, cancel: m.status === 'CANCELLED' }); }
+      else if (m.fund === 'caja_diaria') { const v = m.type === 'INCOME' ? m.amount : -m.amount; o.push({ t: m.time, sort: m.createdAt, kind: 'Movimiento manual', det: m.description, cash: v, mp: 0, fi: 0, cancel: m.status === 'CANCELLED' }); }
     }
     for (const c of data.closures) if (c.loc === loc && c.date === T && (c.autoTransferId || c.expectedMp !== undefined)) o.push({ t: c.time, sort: c.createdAt, kind: 'Cierre de caja', det: 'Pasaron ' + money(c.countedCash) + ' a caja general', cash: -c.expectedCash, mp: -(c.expectedMp || 0), fi: 0, cancel: c.status === 'CANCELLED', closure: c.id });
     return o.sort((a, b) => (b.sort || '').localeCompare(a.sort || ''));
@@ -70,7 +70,7 @@ const CajaHoy: React.FC<{ loc: Loc; onSale: (id: string) => void; onClosure: (id
         <Kpi label={<><span className="ds-dot" style={{ background: 'var(--cash)' }} />Efectivo</>} value={money(d.cashIn - d.cashOut)} sub={'Entró ' + money(d.cashIn) + ' · salió ' + money(d.cashOut)}>
           <div className="ds-note" style={{ marginTop: 6 }}>En el cajón tendría que haber <b className="num" style={{ color: 'var(--ink)' }}>{money(d.drawer)}</b>{d.closedCash ? ' (después del cierre)' : ''}</div>
         </Kpi>
-        <Kpi label={<><span className="ds-dot" style={{ background: 'var(--mp)' }} />Mercado Pago</>} value={money(d.mpIn - d.mpOut)} sub={'Entró ' + money(d.mpIn) + (d.mpOut ? ' · salió ' + money(d.mpOut) : '') + (d.transferIn ? ' · transferencias ' + money(d.transferIn) : '')} />
+        <Kpi label={<><span className="ds-dot" style={{ background: 'var(--mp)' }} />Mercado Pago</>} value={money(d.mpIn)} sub={'Entró hoy' + (d.transferIn ? ' · transferencias ' + money(d.transferIn) : '') + '. Lo que pagás con Mercado Pago sale del Mercado Pago general.'} />
         <Kpi label={<><span className="ds-dot" style={{ background: 'var(--fiado)' }} />Fiado</>} value={money(d.credit)} sub={'Fiado hoy · cobraste ' + money(d.collectedDebt) + ' de fiados'} />
       </div>
       <div className="ds-panel">
@@ -199,7 +199,7 @@ const CajaGeneral: React.FC = () => {
         <div className="ds-grid g3" style={{ alignItems: 'end' }}>
           <div className="ds-kpi"><span className="ds-label">Tu plata total</span><span className="v num" style={{ fontSize: '2.2rem' }}>{money(g.total)}</span><span className="s">Efectivo + Mercado Pago{g.transfer ? ' + transferencias' : ''}</span></div>
           <div className="ds-kpi"><span className="ds-label"><span className="ds-dot" style={{ background: 'var(--cash)' }} />Efectivo</span><span className="v num">{money(g.cash)}</span><span className="s">Lo que pasó por los cierres y pases, menos lo que pagaste con esta plata</span></div>
-          <div className="ds-kpi"><span className="ds-label"><span className="ds-dot" style={{ background: 'var(--mp)' }} />Mercado Pago</span><span className="v num">{money(g.mp)}</span><span className="s">{g.transfer ? 'Más ' + money(g.transfer) + ' en transferencias' : 'Plata digital'}</span></div>
+          <div className="ds-kpi"><span className="ds-label"><span className="ds-dot" style={{ background: 'var(--mp)' }} />Mercado Pago general</span><span className="v num">{money(g.mp)}</span><span className="s">Todo lo que entró por MP, menos lo que pagaste con MP{g.transfer ? '. Más ' + money(g.transfer) + ' en transferencias' : ''}</span></div>
         </div>
         {Math.abs(g.openDrawers) >= 1 && <div className="ds-note" style={{ marginTop: 12 }}>Además hay <b className="num">{money(g.openDrawers)}</b> en efectivo en los cajones de hoy que todavía no se cerraron.</div>}
       </div>
@@ -240,6 +240,7 @@ const Gastos: React.FC = () => {
               <td className="r num">{money(e.amount)}</td>
               <td className="r" style={{ whiteSpace: 'nowrap' }}>
                 {e.status !== 'CANCELLED' && !e.fundExplicit && fix !== e.id && <button className="ds-btn ghost sm" onClick={() => setFix(e.id)}>Corregir</button>}
+                {e.status !== 'CANCELLED' && <MoveLocButton col="expenses" id={e.id} loc={e.loc} />}
                 {e.status !== 'CANCELLED' && <button className="ds-btn ghost sm" disabled={busy} onClick={() => run(() => cancelExpense(e.id, 'Anulado desde Caja'), () => 'Gasto anulado. La plata vuelve a ' + FUND_LABEL[e.fund] + '.')}>Anular</button>}
               </td>
             </tr>

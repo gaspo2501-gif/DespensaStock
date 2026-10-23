@@ -17,7 +17,7 @@ export type Fund = 'caja_diaria' | 'caja_general' | 'mercado_pago' | 'transfer' 
 export const FUND_LABEL: Record<Fund, string> = {
   caja_diaria: 'Efectivo del cajón',
   caja_general: 'Efectivo de caja general',
-  mercado_pago: 'Mercado Pago',
+  mercado_pago: 'Mercado Pago general',
   transfer: 'Transferencia',
   other: 'Otro',
 };
@@ -80,6 +80,8 @@ export interface Sale {
   cancellationReason?: string;
   /** Correcciones de forma de pago hechas después de la venta. */
   paymentChanges?: { at: string; reason: string }[];
+  /** Cambios de sucursal hechos después de la venta. */
+  locationChanges?: { at: string; reason: string; from: string; to: string }[];
 }
 
 export interface AccMov {

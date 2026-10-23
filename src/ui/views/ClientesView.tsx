@@ -3,7 +3,7 @@ import { LOCS } from '../../core/model';
 import { balances, fdate, money, parseAmount } from '../../core/calc';
 import { useData } from '../../data/DataContext';
 import { registerCustomerPayment } from '../../data/ops';
-import { AmountInput, copyText, Modal, PayPills, useRun, useToast } from '../common';
+import { AmountInput, copyText, Modal, MoveLocButton, PayPills, useRun, useToast } from '../common';
 import { NewCustomerModal } from './VentaView';
 import type { ShellApi } from '../Shell';
 
@@ -78,7 +78,7 @@ const CustomerDetail: React.FC<{ id: string; onClose: () => void; onCollect: () 
           <tr key={a.id} className={a.status === 'CANCELLED' ? 'cancel' : ''}>
             <td className="num">{fdate(a.date)}</td>
             <td>{a.type === 'DEBT' ? <span className="ds-pill p-fi">Fiado</span> : <><span className="ds-pill p-ok">Pago</span> <PayPills pay={a.pay} /></>}</td>
-            <td className="muted">{LOCS[a.loc]}</td>
+            <td className="muted">{LOCS[a.loc]}{a.type === 'PAYMENT' && a.status !== 'CANCELLED' && <> <MoveLocButton col="account_movements" id={a.id} loc={a.loc} /></>}</td>
             <td className="r num">{a.type === 'DEBT' ? '+' : '−'}{money(a.amount)}</td>
           </tr>
         ))}</tbody>
