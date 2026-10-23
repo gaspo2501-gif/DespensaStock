@@ -195,6 +195,64 @@ export async function changeSalePayment(args: { saleId: string; pay: Pay; custom
   return summary || 'ok';
 }
 
+/**
+ * Pasa una venta a la otra sucursal (se cargó en la sucursal equivocada).
+ * Devuelve el stock a la sucursal original y lo descuenta en la nueva; la deuda de fiado y las cajas
+ * pasan a la sucursal nueva. Queda guardado el historial en la venta (locationHistory).
+ */
+export async function changeSaleLocation(saleId: string, to: Loc, reason?: string) {
+  if (!isOnline()) throw new UserError('Para cambiar la sucursal de una venta hace falta conexión.');
+  const [debtSnap, cashSnap] = await Promise.all([
+    getDocs(query(collection(db, 'account_movements'), where('saleId', '==', saleId))),
+    getDocs(query(collection(db, 'cash_movements'), where('sourceId', '==', saleId))),
+  ]);
+  const iso = nowIso();
+  const why = (reason || '').trim() || 'Cambio de sucursal';
+  const negatives: string[] = [];
+  await runTransaction(db, async (tx: any) => {
+    const ref = doc(db, 'sales', saleId);
+    const s = await tx.get(ref);
+    if (!s.exists()) throw new UserError('No se encontró la venta.');
+    const d = s.data();
+    if (d.status === 'CANCELLED') throw new UserError('La venta está anulada.');
+    const from: Loc = d.locationId === 'olascoaga' ? 'olascoaga' : 'aimogasta';
+    if (from === to) throw new UserError('La venta ya está en ' + LOCS[to] + '.');
+    const byProd = new Map<string, { qty: number; name: string }>();
+    for (const it of (Array.isArray(d.items) ? d.items : [])) {
+      if (!it.productId) continue;
+      const x = byProd.get(it.productId) || { qty: 0, name: it.name || 'Producto' };
+      x.qty += Number(it.quantity) || 0; byProd.set(it.productId, x);
+    }
+    const keys = [...byProd.keys()];
+    const prodSnaps: any[] = [];
+    for (const k of keys) prodSnaps.push(await tx.get(doc(db, 'products', k)));
+    const others: any[] = [];
+    for (const m of [...debtSnap.docs, ...cashSnap.docs]) { const x = await tx.get(m.ref); if (x.exists()) others.push(x); }
+    prodSnaps.forEach((ps, i) => {
+      if (!ps.exists()) return;
+      const x = byProd.get(keys[i])!;
+      const st = rawStock(ps.data());
+      const next = { ...st, [from]: st[from] + x.qty, [to]: st[to] - x.qty };
+      if (next[to] < 0) negatives.push(x.name + ' (' + next[to] + ')');
+      tx.update(ps.ref, { ...fullStockUpdate(next), updatedAt: ts() });
+    });
+    tx.update(ref, {
+      locationId: to,
+      locationHistory: [...(Array.isArray(d.locationHistory) ? d.locationHistory : []), { changedAtIso: iso, reason: why, from, to }],
+      updatedAt: ts(),
+    });
+    for (const x of others) tx.update(x.ref, { locationId: to });
+  });
+  return { negatives };
+}
+
+/** Pasar un gasto o un cobro de fiado a la otra sucursal (no mueve stock). */
+export async function changeRecordLocation(col: 'expenses' | 'account_movements', id: string, to: Loc) {
+  if (!isOnline()) throw new UserError('Para cambiar la sucursal hace falta conexión.');
+  await updateDoc(doc(db, col, id), { locationId: to, updatedAt: ts() });
+  return true;
+}
+
 /* ============================ CLIENTES ============================ */
 export async function createCustomer(name: string, phone: string): Promise<Customer> {
   const clean = name.trim();

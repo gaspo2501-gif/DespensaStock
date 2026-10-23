@@ -119,6 +119,7 @@ export function normSale(id: string, d: Raw): Sale {
     method: d.paymentMethod || 'cash', pay: payOfSale(d, total),
     customerId: d.customerId || undefined, customerName: d.customerName || undefined,
     status: statusOf(d), cancellationReason: d.cancellationReason || undefined,
+    locationChanges: Array.isArray(d.locationHistory) ? d.locationHistory.map((h: Raw) => ({ at: h.changedAtIso || '', reason: h.reason || '', from: h.from || '', to: h.to || '' })) : undefined,
     paymentChanges: Array.isArray(d.paymentHistory) ? d.paymentHistory.map((h: Raw) => ({ at: h.changedAtIso || '', reason: h.reason || '' })) : undefined,
   };
 }

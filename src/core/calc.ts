@@ -95,10 +95,11 @@ export interface DayCash {
  */
 export function dayCash(data: DataState, loc: Loc, date: string): DayCash {
   const r: DayCash = { cashIn: 0, cashOut: 0, mpIn: 0, mpOut: 0, transferIn: 0, transferOut: 0, credit: 0, sold: 0, salesCount: 0, collectedDebt: 0, manualToGeneral: 0, closedCash: 0, closedMp: 0, drawer: 0, mpPending: 0 };
+  // Gastos, pagos a proveedores y movimientos manuales solo afectan la caja del día si son con efectivo del cajón.
+  // Lo que se paga con Mercado Pago o transferencia sale del Mercado Pago general (ver generalCash), no del día.
   const add = (fund: string, amount: number, inflow: boolean) => {
-    if (fund === 'caja_diaria') inflow ? (r.cashIn += amount) : (r.cashOut += amount);
-    else if (fund === 'mercado_pago') inflow ? (r.mpIn += amount) : (r.mpOut += amount);
-    else if (fund === 'transfer') inflow ? (r.transferIn += amount) : (r.transferOut += amount);
+    if (fund !== 'caja_diaria') return;
+    if (inflow) r.cashIn += amount; else r.cashOut += amount;
   };
   for (const s of data.sales) {
     if (!active(s) || s.loc !== loc || s.date !== date) continue;

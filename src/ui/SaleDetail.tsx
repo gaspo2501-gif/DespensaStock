@@ -1,8 +1,8 @@
 import React, { useMemo, useState } from 'react';
-import { LOCS, Sale } from '../core/model';
+import { LOCS, Loc, otherLoc, Sale } from '../core/model';
 import { balances, fdate, money, parseAmount, payFromParts, payTotal } from '../core/calc';
 import { useData } from '../data/DataContext';
-import { cancelSale, changeSalePayment } from '../data/ops';
+import { cancelSale, changeSaleLocation, changeSalePayment } from '../data/ops';
 import { BarcodeScanner } from '../components/scanner/BarcodeScanner';
 import { AmountInput, Modal, PayPills, useRun } from './common';
 
@@ -31,7 +31,8 @@ export const SaleDetailModal: React.FC<{ saleId: string; onClose: () => void }> 
       <PayPills pay={s.pay} />
       {s.customerName && s.pay.credit > 0 && <div className="small">Fiado a nombre de <b>{s.customerName}</b></div>}
       {s.paymentChanges && s.paymentChanges.length > 0 && <div className="small muted">Forma de pago corregida: {s.paymentChanges.map((c) => fdate(c.at.slice(0, 10)) + (c.reason ? ' (' + c.reason + ')' : '')).join(' · ')}</div>}
-      {!cancelled && <ChangePayment sale={s} />}
+      {s.locationChanges && s.locationChanges.length > 0 && <div className="small muted">Sucursal corregida: {s.locationChanges.map((c) => fdate(c.at.slice(0, 10)) + ' de ' + (LOCS[c.from as Loc] || c.from) + ' a ' + (LOCS[c.to as Loc] || c.to) + (c.reason ? ' (' + c.reason + ')' : '')).join(' · ')}</div>}
+      {!cancelled && <div className="ds-row" style={{ alignItems: 'flex-start' }}><ChangePayment sale={s} /><ChangeLocation sale={s} onMoved={onClose} /></div>}
       {!cancelled && (
         <details>
           <summary>Anular esta venta</summary>
@@ -43,6 +44,39 @@ export const SaleDetailModal: React.FC<{ saleId: string; onClose: () => void }> 
         </details>
       )}
     </Modal>
+  );
+};
+
+/** Pasar la venta a la otra sucursal. */
+const ChangeLocation: React.FC<{ sale: Sale; onMoved: () => void }> = ({ sale, onMoved }) => {
+  const { data } = useData();
+  const { run, busy } = useRun();
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState('');
+  const to = otherLoc(sale.loc);
+  const rows = useMemo(() => {
+    const m = new Map<string, { name: string; qty: number }>();
+    for (const i of sale.items) { const x = m.get(i.productId) || { name: i.name, qty: 0 }; x.qty += i.qty; m.set(i.productId, x); }
+    return [...m.entries()].map(([id, x]) => { const p = data.products.find((y) => y.id === id); return { ...x, from: p ? p.stock[sale.loc] : 0, to: p ? p.stock[to] : 0 }; });
+  }, [sale, data.products, to]);
+  const neg = rows.filter((r) => r.to - r.qty < 0);
+  const closed = data.closures.some((c) => c.date === sale.date && c.status !== 'CANCELLED' && (c.loc === sale.loc || c.loc === to));
+  if (!open) return <button className="ds-btn" onClick={() => setOpen(true)}>Pasar a {LOCS[to]}</button>;
+  return (
+    <div className="ds-panel soft ds-col" style={{ flexBasis: '100%' }}>
+      <div className="ds-row spread"><b>Pasar esta venta de {LOCS[sale.loc]} a {LOCS[to]}</b><button className="ds-btn ghost sm" onClick={() => setOpen(false)}>Cancelar</button></div>
+      <div className="ds-tbl"><table>
+        <thead><tr><th>Producto</th><th className="r">Cant.</th><th className="r">Stock en {LOCS[sale.loc]}</th><th className="r">Stock en {LOCS[to]}</th></tr></thead>
+        <tbody>{rows.map((r, i) => <tr key={i}><td>{r.name}</td><td className="r num">{r.qty}</td><td className="r num">{r.from} → {r.from + r.qty}</td><td className={'r num ' + (r.to - r.qty < 0 ? 'down' : '')}>{r.to} → {r.to - r.qty}</td></tr>)}</tbody>
+      </table></div>
+      <div className="small muted">Se devuelve el stock a {LOCS[sale.loc]} y se descuenta en {LOCS[to]}. La venta, la plata{sale.pay.credit > 0 ? ' y el fiado' : ''} pasan a la caja de {LOCS[to]} del {fdate(sale.date)}.</div>
+      {neg.length > 0 && <div className="ds-note" style={{ color: 'var(--danger)', background: 'var(--danger-soft)' }}>En {LOCS[to]} el stock de {neg.map((r) => r.name).join(', ')} quedaría en negativo. Podés pasarla igual y después corregir el stock desde Stock.</div>}
+      {closed && <div className="ds-note" style={{ color: 'var(--warn)', background: 'var(--warn-soft)' }}>Una de las cajas de ese día ya está cerrada. Los cierres guardados no se modifican: la corrección va a aparecer como diferencia.</div>}
+      <label className="ds-field"><span>Motivo (opcional)</span><input id="cl-reason" type="text" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Ej: se cargó con la sucursal equivocada" /></label>
+      <button className="ds-btn pri" style={{ alignSelf: 'flex-start' }} disabled={busy}
+        onClick={() => run(() => changeSaleLocation(sale.id, to, reason), (r) => 'Venta pasada a ' + LOCS[to] + '.' + (r.negatives.length ? ' Revisá el stock de: ' + r.negatives.join(', ') + '.' : ''))
+          .then((r) => { if (r) onMoved(); })}>Pasar a {LOCS[to]}</button>
+    </div>
   );
 };
 
