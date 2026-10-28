@@ -1,4 +1,4 @@
-const CACHE_NAME = 'despensa-stock-v2.0.0';
+const CACHE_NAME = 'despensa-stock-v2.1.0';
 
 // Listen for skip waiting command from UI prompt
 self.addEventListener('message', (event) => {

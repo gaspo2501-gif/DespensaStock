@@ -169,6 +169,9 @@ export interface CashMov {
   fund: Fund;
   description: string;
   closureId?: string;
+  /** true en los movimientos de "Ajuste de saldo" de caja general. */
+  adjustment?: boolean;
+  notes?: string;
   status: Status;
   rawLocation?: string;
 }

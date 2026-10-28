@@ -193,7 +193,7 @@ export function normCashMov(id: string, d: Raw): CashMov | null {
   return {
     id, type: d.type === 'EXPENSE' ? 'EXPENSE' : 'INCOME', sourceType: st, amount: n(d.amount), date: dateOf(d), time: timeOf(created),
     createdAt: created, loc: locOf(d.locationId), fund, description: d.description || '', closureId: d.closureId || undefined,
-    status: statusOf(d), rawLocation: d.locationId,
+    adjustment: d.adjustment === true, notes: d.notes || '', status: statusOf(d), rawLocation: d.locationId,
   };
 }
 
