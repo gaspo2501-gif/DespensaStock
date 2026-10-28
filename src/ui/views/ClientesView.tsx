@@ -1,11 +1,25 @@
 import React, { useMemo, useState } from 'react';
-import { LOCS } from '../../core/model';
+import { AccMov, LOCS, Sale } from '../../core/model';
 import { balances, fdate, money, parseAmount } from '../../core/calc';
 import { useData } from '../../data/DataContext';
 import { registerCustomerPayment } from '../../data/ops';
 import { AmountInput, copyText, Modal, MoveLocButton, PayPills, useRun, useToast } from '../common';
 import { NewCustomerModal } from './VentaView';
 import type { ShellApi } from '../Shell';
+import { SaleDetailModal } from '../SaleDetail';
+
+/**
+ * Cuánto queda pendiente de cada fiado: los pagos se aplican a los fiados más viejos primero.
+ */
+function pendingByDebt(movs: AccMov[]): Map<string, number> {
+  const act = movs.filter((a) => a.status !== 'CANCELLED');
+  let paid = act.filter((a) => a.type === 'PAYMENT').reduce((t, a) => t + a.amount, 0);
+  const debts = act.filter((a) => a.type === 'DEBT').sort((x, y) => (x.createdAt || x.date).localeCompare(y.createdAt || y.date));
+  const out = new Map<string, number>();
+  for (const d of debts) { const used = Math.min(paid, d.amount); paid -= used; out.set(d.id, Math.round((d.amount - used) * 100) / 100); }
+  return out;
+}
+const itemsText = (s?: Sale) => (s ? s.items.map((i) => i.qty + '× ' + i.name).join(', ') : '');
 
 export const ClientesView: React.FC<{ api: ShellApi }> = ({ api }) => {
   const { data } = useData();
@@ -60,29 +74,68 @@ export const ClientesView: React.FC<{ api: ShellApi }> = ({ api }) => {
 const CustomerDetail: React.FC<{ id: string; onClose: () => void; onCollect: () => void }> = ({ id, onClose, onCollect }) => {
   const { data } = useData();
   const toast = useToast();
+  const [saleId, setSaleId] = useState<string | null>(null);
+  const [open, setOpen] = useState<Set<string>>(new Set());
   const c = data.customers.find((x) => x.id === id);
   const b = balances(data)[id] || 0;
+  const salesById = useMemo(() => new Map(data.sales.map((s) => [s.id, s])), [data.sales]);
+  const movs = useMemo(() => data.acc.filter((a) => a.customerId === id).sort((x, y) => (y.createdAt || y.date).localeCompare(x.createdAt || x.date)), [data.acc, id]);
+  const pending = useMemo(() => pendingByDebt(movs), [movs]);
   if (!c) return null;
-  const movs = data.acc.filter((a) => a.customerId === id).sort((x, y) => (y.createdAt || y.date).localeCompare(x.createdAt || x.date));
-  const msg = `Hola ${c.name.split(' ')[0]}, te recuerdo que tenés un saldo pendiente de ${money(b)} en la despensa. ¡Gracias!`;
+  const pendingDebts = movs.filter((a) => a.type === 'DEBT' && a.status !== 'CANCELLED' && (pending.get(a.id) || 0) > 0.5).reverse();
+  const detailLines = pendingDebts.map((a) => {
+    const s = a.saleId ? salesById.get(a.saleId) : undefined;
+    const p = pending.get(a.id) || 0;
+    return '• ' + fdate(a.date) + ': ' + (itemsText(s) || a.description || 'Fiado') + ' — ' + money(p) + (p < a.amount - 0.5 ? ' (de ' + money(a.amount) + ')' : '');
+  });
+  const msg = `Hola ${c.name.split(' ')[0]}, te recuerdo que tenés un saldo pendiente de ${money(b)} en la despensa.` + (detailLines.length ? `\n\nDetalle:\n${detailLines.join('\n')}` : '') + `\n\n¡Gracias!`;
+  const toggle = (k: string) => setOpen((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   return (
     <Modal title={c.name} onClose={onClose} wide>
       <div className="ds-row spread">
         <div className="ds-kpi"><span className="ds-label">Debe</span><span className="v num" style={{ color: 'var(--fiado)' }}>{money(b)}</span></div>
-        {b > 0.5 && <div className="ds-row"><button className="ds-btn pri" onClick={onCollect}>Cobrar</button><button className="ds-btn" onClick={() => copyText(msg, toast)}>Copiar recordatorio para WhatsApp</button></div>}
+        {b > 0.5 && <div className="ds-row"><button className="ds-btn pri" onClick={onCollect}>Cobrar</button><button className="ds-btn" onClick={() => copyText(msg, toast)}>Copiar recordatorio con el detalle</button></div>}
       </div>
       {c.phone && <div className="small muted">Teléfono: <span className="num" style={{ userSelect: 'all' }}>{c.phone}</span></div>}
+      <div className="small muted">Tocá un fiado para ver qué llevó. Los pagos se descuentan de los fiados más viejos primero.</div>
       <div className="ds-tbl"><table>
-        <thead><tr><th>Fecha</th><th>Movimiento</th><th>Sucursal</th><th className="r">Importe</th></tr></thead>
-        <tbody>{movs.map((a) => (
-          <tr key={a.id} className={a.status === 'CANCELLED' ? 'cancel' : ''}>
-            <td className="num">{fdate(a.date)}</td>
-            <td>{a.type === 'DEBT' ? <span className="ds-pill p-fi">Fiado</span> : <><span className="ds-pill p-ok">Pago</span> <PayPills pay={a.pay} /></>}</td>
-            <td className="muted">{LOCS[a.loc]}{a.type === 'PAYMENT' && a.status !== 'CANCELLED' && <> <MoveLocButton col="account_movements" id={a.id} loc={a.loc} /></>}</td>
-            <td className="r num">{a.type === 'DEBT' ? '+' : '−'}{money(a.amount)}</td>
-          </tr>
-        ))}</tbody>
+        <thead><tr><th>Fecha</th><th>Movimiento</th><th>Sucursal</th><th className="r">Importe</th><th>Estado</th></tr></thead>
+        <tbody>{movs.map((a) => {
+          const s = a.type === 'DEBT' && a.saleId ? salesById.get(a.saleId) : undefined;
+          const p = pending.get(a.id) || 0;
+          const isOpen = open.has(a.id);
+          const cancelled = a.status === 'CANCELLED';
+          return (
+            <React.Fragment key={a.id}>
+              <tr className={(a.type === 'DEBT' ? 'click ' : '') + (cancelled ? 'cancel' : '')} onClick={() => a.type === 'DEBT' && toggle(a.id)}>
+                <td className="num">{fdate(a.date)}{s?.time ? <div className="small muted">{s.time}</div> : null}</td>
+                <td>
+                  {a.type === 'DEBT' ? <><span className="ds-pill p-fi">Fiado</span> <span className="small muted">{isOpen ? '▾' : '▸'} {s ? s.items.length + (s.items.length === 1 ? ' producto' : ' productos') : (a.description || 'sin detalle')}</span></>
+                    : <><span className="ds-pill p-ok">Pago</span> <PayPills pay={a.pay} /></>}
+                  {a.type === 'DEBT' && !isOpen && s && <div className="small muted trunc" style={{ maxWidth: 360 }}>{itemsText(s)}</div>}
+                </td>
+                <td className="muted">{LOCS[a.loc]}{a.type === 'PAYMENT' && !cancelled && <> <MoveLocButton col="account_movements" id={a.id} loc={a.loc} /></>}</td>
+                <td className="r num">{a.type === 'DEBT' ? '+' : '−'}{money(a.amount)}</td>
+                <td>{a.type === 'DEBT' && !cancelled && (p < 0.5 ? <span className="ds-pill p-ok">Pagado</span> : p < a.amount - 0.5 ? <span className="ds-pill p-warn num">Debe {money(p)}</span> : <span className="ds-pill p-fi">Pendiente</span>)}</td>
+              </tr>
+              {isOpen && (
+                <tr><td colSpan={5} style={{ background: 'var(--surface-2)' }}>
+                  {s ? (
+                    <div className="ds-col" style={{ gap: 6 }}>
+                      <table style={{ width: '100%' }}><tbody>
+                        {s.items.map((i, k) => <tr key={k}><td style={{ border: 0, padding: '2px 0' }}>{i.qty}× {i.name}</td><td className="r num" style={{ border: 0, padding: '2px 0' }}>{money(i.unitPrice)} c/u</td><td className="r num" style={{ border: 0, padding: '2px 0' }}><b>{money(i.subtotal)}</b></td></tr>)}
+                      </tbody></table>
+                      <div className="small muted">{s.pay.credit < s.total - 0.5 ? 'Venta de ' + money(s.total) + ': fiado ' + money(s.pay.credit) + ', el resto se pagó en el momento. ' : ''}{s.status === 'CANCELLED' ? 'La venta fue anulada. ' : ''}</div>
+                      <button className="ds-btn sm" style={{ alignSelf: 'flex-start' }} onClick={() => setSaleId(s.id)}>Ver la venta completa</button>
+                    </div>
+                  ) : <div className="small muted">{a.description || 'Fiado'}: este fiado no está asociado a una venta, así que no tiene detalle de productos.</div>}
+                </td></tr>
+              )}
+            </React.Fragment>
+          );
+        })}</tbody>
       </table></div>
+      {saleId && <SaleDetailModal saleId={saleId} onClose={() => setSaleId(null)} />}
     </Modal>
   );
 };

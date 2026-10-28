@@ -75,11 +75,15 @@ export function useRun() {
 }
 
 /* ---------------- Modal ---------------- */
+const modalStack: object[] = [];
 export const Modal: React.FC<{ title: string; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode; wide?: boolean }> = ({ title, onClose, children, footer, wide }) => {
   useEffect(() => {
-    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    // Con ventanas una sobre otra, Escape cierra solo la de arriba.
+    const token = {};
+    modalStack.push(token);
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && modalStack[modalStack.length - 1] === token) onClose(); };
     window.addEventListener('keydown', k);
-    return () => window.removeEventListener('keydown', k);
+    return () => { window.removeEventListener('keydown', k); const i = modalStack.indexOf(token); if (i >= 0) modalStack.splice(i, 1); };
   }, [onClose]);
   return (
     <div className="ds-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
