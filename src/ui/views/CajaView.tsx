@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Closure, Fund, FUND_LABEL, Loc, LOCS, LOC_IDS, PAY_FUNDS } from '../../core/model';
 import { dayCash, fdate, fdateL, generalCash, money, parseAmount, today } from '../../core/calc';
 import { useData } from '../../data/DataContext';
-import { cancelClosure, cancelExpense, closeCash, createExpense, setExpenseFund, setRecordLocation, UserError } from '../../data/ops';
+import { adjustGeneralBalance, cancelManualMovement, cancelClosure, cancelExpense, closeCash, createExpense, setExpenseFund, setRecordLocation, UserError } from '../../data/ops';
 import { AmountInput, Kpi, LocName, Modal, MoveLocButton, useRun } from '../common';
 import { SaleDetailModal } from '../SaleDetail';
 import type { ShellApi } from '../Shell';
@@ -30,7 +30,7 @@ export const CajaView: React.FC<{ api: ShellApi }> = ({ api }) => {
       {allRecords.length > 0 && <FixLocations records={allRecords} />}
       <div className="ds-tabs">{([['hoy', 'Caja del día'], ['general', 'Caja general'], ['gastos', 'Gastos']] as [Tab, string][]).map(([k, l]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}</div>
       {tab === 'hoy' && <CajaHoy loc={loc} onSale={(id) => setModal({ sale: id })} onClosure={(id) => setModal({ closure: id })} />}
-      {tab === 'general' && <CajaGeneral />}
+      {tab === 'general' && <CajaGeneral loc={loc} />}
       {tab === 'gastos' && <Gastos />}
       {modal === 'close' && <CloseModal loc={loc} onClose={() => setModal(null)} />}
       {modal === 'expense' && <ExpenseModal loc={loc} onClose={() => setModal(null)} />}
@@ -174,15 +174,18 @@ const CloseModal: React.FC<{ loc: Loc; onClose: () => void }> = ({ loc, onClose 
   );
 };
 
-const CajaGeneral: React.FC = () => {
+const CajaGeneral: React.FC<{ loc: Loc }> = ({ loc }) => {
   const { data } = useData();
+  const { run, busy } = useRun();
+  const [adjust, setAdjust] = useState(false);
+  const [ask, setAsk] = useState<string | null>(null);
   const g = useMemo(() => generalCash(data), [data]);
   const mv = useMemo(() => {
-    const out: { sort: string; date: string; det: string; cash: number; mp: number }[] = [];
+    const out: { sort: string; date: string; det: string; cash: number; mp: number; id?: string; adj?: boolean }[] = [];
     for (const m of data.cashMovs) {
       if (m.status === 'CANCELLED') continue;
       if (m.sourceType === 'INTERNAL_TRANSFER') out.push({ sort: m.createdAt || m.date, date: m.date, det: (m.closureId ? 'Cierre de caja ' : 'Pase a caja general ') + LOCS[m.loc], cash: m.amount, mp: 0 });
-      else if (m.fund === 'caja_general' || m.fund === 'mercado_pago') { const v = m.type === 'INCOME' ? m.amount : -m.amount; out.push({ sort: m.createdAt || m.date, date: m.date, det: m.description, cash: m.fund === 'caja_general' ? v : 0, mp: m.fund === 'mercado_pago' ? v : 0 }); }
+      else if (m.fund === 'caja_general' || m.fund === 'mercado_pago' || m.fund === 'transfer') { const v = m.type === 'INCOME' ? m.amount : -m.amount; out.push({ sort: m.createdAt || m.date, date: m.date, det: m.description + (m.adjustment && m.notes ? ' · ' + m.notes : ''), cash: m.fund === 'caja_general' ? v : 0, mp: m.fund !== 'caja_general' ? v : 0, id: m.id, adj: m.adjustment }); }
     }
     for (const e of data.expenses) if (e.status !== 'CANCELLED' && (e.fund === 'caja_general' || e.fund === 'mercado_pago')) out.push({ sort: e.createdAt || e.date, date: e.date, det: 'Gasto: ' + e.description + ' (' + LOCS[e.loc] + ')', cash: e.fund === 'caja_general' ? -e.amount : 0, mp: e.fund === 'mercado_pago' ? -e.amount : 0 });
     for (const p of data.spays) if (p.status !== 'CANCELLED' && (p.fund === 'caja_general' || p.fund === 'mercado_pago')) out.push({ sort: p.createdAt || p.date, date: p.date, det: 'Pago a ' + p.providerName, cash: p.fund === 'caja_general' ? -p.amount : 0, mp: p.fund === 'mercado_pago' ? -p.amount : 0 });
@@ -202,14 +205,55 @@ const CajaGeneral: React.FC = () => {
           <div className="ds-kpi"><span className="ds-label"><span className="ds-dot" style={{ background: 'var(--mp)' }} />Mercado Pago general</span><span className="v num">{money(g.mp)}</span><span className="s">Todo lo que entró por MP, menos lo que pagaste con MP{g.transfer ? '. Más ' + money(g.transfer) + ' en transferencias' : ''}</span></div>
         </div>
         {Math.abs(g.openDrawers) >= 1 && <div className="ds-note" style={{ marginTop: 12 }}>Además hay <b className="num">{money(g.openDrawers)}</b> en efectivo en los cajones de hoy que todavía no se cerraron.</div>}
+        <div className="ds-row" style={{ marginTop: 12 }}><button className="ds-btn" onClick={() => setAdjust(true)}>Ajustar saldo</button><span className="small muted">Para llevar el efectivo y Mercado Pago a lo que tenés de verdad.</span></div>
       </div>
       <div className="ds-panel">
         <h2 style={{ marginBottom: 8 }}>Movimientos</h2>
-        <div className="ds-tbl"><table><thead><tr><th>Fecha</th><th>Detalle</th><th className="r">Efectivo</th><th className="r">MP</th></tr></thead>
-          <tbody>{mv.map((m, i) => <tr key={i}><td className="num">{fdate(m.date)}</td><td>{m.det}</td><td className="r">{sign(m.cash)}</td><td className="r">{sign(m.mp)}</td></tr>)}</tbody></table></div>
+        <div className="ds-tbl"><table><thead><tr><th>Fecha</th><th>Detalle</th><th className="r">Efectivo</th><th className="r">MP</th><th /></tr></thead>
+          <tbody>{mv.map((m, i) => (
+            <tr key={i}>
+              <td className="num">{fdate(m.date)}</td><td>{m.adj ? <b>{m.det}</b> : m.det}</td><td className="r">{sign(m.cash)}</td><td className="r">{sign(m.mp)}</td>
+              <td className="r" style={{ whiteSpace: 'nowrap' }}>{m.id && (ask === m.id
+                ? <><button className="ds-btn sm danger" disabled={busy} onClick={() => run(() => cancelManualMovement(m.id!), () => 'Movimiento anulado.').then(() => setAsk(null))}>Confirmar</button> <button className="ds-btn ghost sm" onClick={() => setAsk(null)}>No</button></>
+                : <button className="ds-btn ghost sm" onClick={() => setAsk(m.id!)}>Anular</button>)}</td>
+            </tr>))}</tbody></table></div>
         <div className="small muted" style={{ marginTop: 8 }}>Se muestran los últimos 60.</div>
       </div>
+      {adjust && <AdjustModal loc={loc} appCash={g.cash} appMp={g.mp + g.transfer} transfer={g.transfer} onClose={() => setAdjust(false)} />}
     </>
+  );
+};
+
+const AdjustModal: React.FC<{ loc: Loc; appCash: number; appMp: number; transfer: number; onClose: () => void }> = ({ loc, appCash, appMp, transfer, onClose }) => {
+  const { run, busy } = useRun();
+  const [cash, setCash] = useState(String(Math.round(appCash * 100) / 100));
+  const [mp, setMp] = useState(String(Math.round(appMp * 100) / 100));
+  const [note, setNote] = useState('');
+  const dc = parseAmount(cash) - appCash, dm = parseAmount(mp) - appMp;
+  const d = (v: number) => (Math.abs(v) < 0.01 ? <span className="ds-pill p-ok">Sin cambios</span> : <span className={'ds-pill num ' + (v < 0 ? 'p-bad' : 'p-warn')}>{v > 0 ? 'Se suman ' : 'Se restan '}{money(Math.abs(v))}</span>);
+  return (
+    <Modal title="Ajustar saldo de caja general" onClose={onClose} wide
+      footer={<><button className="ds-btn" onClick={onClose}>Cancelar</button><button className="ds-btn pri" disabled={busy}
+        onClick={() => run(() => adjustGeneralBalance({ realCash: parseAmount(cash), appCash, realMp: parseAmount(mp), appMp, note, loc }), () => 'Saldo ajustado. Si te equivocaste, anulalo desde Movimientos.').then((r) => { if (r) onClose(); })}>Guardar ajuste</button></>}>
+      <div className="ds-grid g2">
+        <div className="ds-panel">
+          <h3>Efectivo de caja general</h3>
+          <div className="ds-cmp" style={{ margin: '8px 0' }}><span>La app dice</span><b className="num">{money(appCash)}</b></div>
+          <label className="ds-field"><span>Tenés de verdad</span><AmountInput id="adj-cash" big autoFocus value={cash} onChange={setCash} /></label>
+          <div style={{ marginTop: 6 }}>{d(dc)}</div>
+          <div className="small muted" style={{ marginTop: 6 }}>Solo la plata guardada. No cuentes lo de los cajones de hoy: eso entra cuando cerrás la caja.</div>
+        </div>
+        <div className="ds-panel">
+          <h3>Mercado Pago general</h3>
+          <div className="ds-cmp" style={{ margin: '8px 0' }}><span>La app dice</span><b className="num">{money(appMp)}</b></div>
+          <label className="ds-field"><span>Saldo real en tu cuenta de Mercado Pago</span><AmountInput id="adj-mp" big value={mp} onChange={setMp} /></label>
+          <div style={{ marginTop: 6 }}>{d(dm)}</div>
+          {transfer !== 0 && <div className="small muted" style={{ marginTop: 6 }}>Incluye {money(transfer)} de transferencias, que entran a la misma cuenta.</div>}
+        </div>
+      </div>
+      <label className="ds-field"><span>Nota (opcional)</span><input id="adj-note" type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ej: saldo inicial real" /></label>
+      <div className="ds-note">La diferencia se guarda como un movimiento “Ajuste de saldo”. No cuenta como venta ni como gasto, así que los reportes no cambian. Mirá el saldo de Mercado Pago justo antes de guardar, por si entró una venta nueva.</div>
+    </Modal>
   );
 };
 

@@ -520,6 +520,46 @@ export async function setExpenseFund(id: string, fund: Fund) {
     paidFrom: fund, paymentMethod: fund === 'mercado_pago' ? 'mercado_pago' : fund === 'transfer' ? 'transfer' : 'cash', updatedAt: ts(),
   }));
 }
+/**
+ * Ajustar saldo de caja general: guarda la diferencia entre lo que tenés de verdad y lo que dice la app
+ * como movimiento manual "Ajuste de saldo" (efectivo de caja general y/o Mercado Pago general).
+ * No es venta ni gasto: no cambia los reportes. Se puede anular.
+ */
+export async function adjustGeneralBalance(args: { realCash: number; appCash: number; realMp: number; appMp: number; note: string; loc: Loc }) {
+  if (!isOnline()) throw new UserError('Para ajustar el saldo hace falta conexión.');
+  const { realCash, appCash, realMp, appMp, loc } = args;
+  if (!(realCash >= 0) || !(realMp >= 0)) throw new UserError('Ingresá los saldos reales (pueden ser 0).');
+  const iso = nowIso(); const date = getArgentinaToday();
+  const note = args.note.trim() || 'Ajuste para llevar el saldo a lo real';
+  const b = writeBatch(db);
+  let count = 0;
+  const add = (diff: number, fund: 'caja_general' | 'mercado_pago', real: number, app: number) => {
+    const amount = Math.round(diff * 100) / 100;
+    if (Math.abs(amount) < 0.01) return;
+    const id = `mov_adj_${Date.now()}_${rnd()}`;
+    const docData: Record<string, any> = {
+      id, type: amount > 0 ? 'INCOME' : 'EXPENSE', amount: Math.abs(amount), paymentMethod: fund === 'mercado_pago' ? 'mercado_pago' : 'cash',
+      description: 'Ajuste de saldo (' + (fund === 'mercado_pago' ? 'Mercado Pago general' : 'efectivo de caja general') + ')',
+      date, sourceType: 'MANUAL', sourceId: id, locationId: loc, paidFrom: fund, originFund: fund,
+      notes: note + ' · la app decía ' + app.toFixed(2) + ', real ' + real.toFixed(2), adjustment: true, createdAtIso: iso, createdAt: ts(),
+    };
+    if (fund === 'caja_general') docData.cashRegisterType = 'caja_general'; // Firestore no acepta valores undefined
+    b.set(doc(db, 'cash_movements', id), docData);
+    count++;
+  };
+  add(realCash - appCash, 'caja_general', realCash, appCash);
+  add(realMp - appMp, 'mercado_pago', realMp, appMp);
+  if (!count) throw new UserError('Los saldos ya coinciden con lo que dice la app. No hay nada para ajustar.');
+  await b.commit();
+  return count;
+}
+/** Anular un movimiento manual (por ejemplo un ajuste de saldo cargado mal). */
+export async function cancelManualMovement(id: string) {
+  if (!isOnline()) throw new UserError('Para anular hace falta conexión.');
+  await updateDoc(doc(db, 'cash_movements', id), { status: 'CANCELLED', cancelledAt: ts(), cancelledAtIso: nowIso(), cancellationReason: 'Anulado desde Caja general' });
+  return true;
+}
+
 /** Asignar sucursal a un registro que quedó guardado con "Todas". */
 export async function setRecordLocation(col: 'expenses' | 'cash_movements' | 'cash_closures', id: string, loc: Loc) {
   await runWrite(() => updateDoc(doc(db, col, id), { locationId: loc }));
