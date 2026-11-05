@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Closure, Fund, FUND_LABEL, Loc, LOCS, LOC_IDS, PAY_FUNDS } from '../../core/model';
-import { dayCash, fdate, fdateL, generalCash, money, parseAmount, today } from '../../core/calc';
+import { addDays, dayCash, fdate, fdateL, generalCash, money, parseAmount, today, unclosedDays } from '../../core/calc';
 import { useData } from '../../data/DataContext';
 import { adjustGeneralBalance, cancelManualMovement, cancelClosure, cancelExpense, closeCash, createExpense, setExpenseFund, setRecordLocation, UserError } from '../../data/ops';
 import { AmountInput, Kpi, LocName, Modal, MoveLocButton, useRun } from '../common';
@@ -13,8 +13,10 @@ type Tab = 'hoy' | 'general' | 'gastos';
 export const CajaView: React.FC<{ api: ShellApi }> = ({ api }) => {
   const { data } = useData();
   const [tab, setTab] = useState<Tab>('hoy');
-  const [modal, setModal] = useState<null | 'close' | 'expense' | { sale: string } | { closure: string }>(null);
+  const [modal, setModal] = useState<null | 'close' | 'expense' | { sale: string } | { closure: string } | { closeDay: string; loc: Loc }>(null);
+  const [day, setDay] = useState(today());
   const loc = api.loc;
+  const unclosed = useMemo(() => unclosedDays(data), [data]);
   const allRecords = useMemo(() => [
     ...data.expenses.filter((e) => e.rawLocation === 'all').map((e) => ({ col: 'expenses' as const, id: e.id, label: 'Gasto: ' + e.description, date: e.date, amount: e.amount })),
     ...data.cashMovs.filter((m) => m.rawLocation === 'all').map((m) => ({ col: 'cash_movements' as const, id: m.id, label: m.description, date: m.date, amount: m.amount })),
@@ -24,15 +26,29 @@ export const CajaView: React.FC<{ api: ShellApi }> = ({ api }) => {
   return (
     <>
       <div className="ds-row spread">
-        <div><h1>Caja</h1><div className="muted">{tab === 'general' ? 'Tu plata acumulada, las dos sucursales' : <>Sucursal <LocName loc={loc} /> · {fdateL(today())}</>}</div></div>
-        <div className="ds-row"><button className="ds-btn" onClick={() => setModal('expense')}>Registrar gasto</button>{tab === 'hoy' && <button className="ds-btn pri" onClick={() => setModal('close')}>Cerrar caja</button>}</div>
+        <div><h1>Caja</h1><div className="muted">{tab === 'general' ? 'Tu plata acumulada, las dos sucursales' : <>Sucursal <LocName loc={loc} /> · {fdateL(day)}</>}</div></div>
+        <div className="ds-row"><button className="ds-btn" onClick={() => setModal('expense')}>Registrar gasto</button>{tab === 'hoy' && day === today() && <button className="ds-btn pri" onClick={() => setModal('close')}>Cerrar caja</button>}</div>
       </div>
+      {unclosed.length > 0 && (
+        <div className="ds-panel" style={{ borderColor: 'var(--warn)' }}>
+          <b>Cierres pendientes de aprobar</b>
+          <div className="small muted" style={{ margin: '4px 0 8px' }}>Estos días tuvieron movimiento y la caja no se cerró. La plata no se pierde: el efectivo sigue esperando a pasar a caja general. Revisá los montos y aprobá el cierre.</div>
+          <div className="ds-list">{unclosed.map((u) => (
+            <div className="ds-li" key={u.loc + u.date}>
+              <div className="grow"><b>{fdateL(u.date)}</b> · {LOCS[u.loc]}<div className="small muted">Efectivo a pasar <b className="num">{money(u.d.drawer)}</b> · Mercado Pago del día {money(u.d.mpPending)} · {u.d.salesCount} ventas</div></div>
+              <button className="ds-btn sm" onClick={() => { setTab('hoy'); setDay(u.date); }}>Ver el día</button>
+              <button className="ds-btn sm pri" onClick={() => setModal({ closeDay: u.date, loc: u.loc })}>Revisar y aprobar</button>
+            </div>
+          ))}</div>
+        </div>
+      )}
       {allRecords.length > 0 && <FixLocations records={allRecords} />}
       <div className="ds-tabs">{([['hoy', 'Caja del día'], ['general', 'Caja general'], ['gastos', 'Gastos']] as [Tab, string][]).map(([k, l]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}</div>
-      {tab === 'hoy' && <CajaHoy loc={loc} onSale={(id) => setModal({ sale: id })} onClosure={(id) => setModal({ closure: id })} />}
+      {tab === 'hoy' && <CajaHoy loc={loc} day={day} setDay={setDay} onCloseDay={() => setModal({ closeDay: day, loc })} onSale={(id) => setModal({ sale: id })} onClosure={(id) => setModal({ closure: id })} />}
       {tab === 'general' && <CajaGeneral loc={loc} />}
       {tab === 'gastos' && <Gastos />}
       {modal === 'close' && <CloseModal loc={loc} onClose={() => setModal(null)} />}
+      {modal && typeof modal === 'object' && 'closeDay' in modal && <CloseModal loc={modal.loc} date={modal.closeDay} onClose={() => setModal(null)} />}
       {modal === 'expense' && <ExpenseModal loc={loc} onClose={() => setModal(null)} />}
       {modal && typeof modal === 'object' && 'sale' in modal && <SaleDetailModal saleId={modal.sale} onClose={() => setModal(null)} />}
       {modal && typeof modal === 'object' && 'closure' in modal && <ClosureModal id={modal.closure} onClose={() => setModal(null)} />}
@@ -42,9 +58,10 @@ export const CajaView: React.FC<{ api: ShellApi }> = ({ api }) => {
 
 interface Op { t: string; kind: string; det: string; cash: number; mp: number; fi: number; cancel?: boolean; sale?: string; closure?: string; sort: string }
 
-const CajaHoy: React.FC<{ loc: Loc; onSale: (id: string) => void; onClosure: (id: string) => void }> = ({ loc, onSale, onClosure }) => {
+const CajaHoy: React.FC<{ loc: Loc; day: string; setDay: (d: string) => void; onCloseDay: () => void; onSale: (id: string) => void; onClosure: (id: string) => void }> = ({ loc, day, setDay, onCloseDay, onSale, onClosure }) => {
   const { data } = useData();
-  const T = today();
+  const T = day;
+  const isToday = day === today();
   const d = useMemo(() => dayCash(data, loc, T), [data, loc, T]);
   const custName = useMemo(() => new Map(data.customers.map((c) => [c.id, c.name])), [data.customers]);
   const ops = useMemo(() => {
@@ -61,20 +78,34 @@ const CajaHoy: React.FC<{ loc: Loc; onSale: (id: string) => void; onClosure: (id
     return o.sort((a, b) => (b.sort || '').localeCompare(a.sort || ''));
   }, [data, loc, T, custName]);
   const closuresToday = data.closures.filter((c) => c.loc === loc && c.date === T);
-  const past = data.closures.filter((c) => c.loc === loc && c.date < T && c.status !== 'CANCELLED').sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 6);
+  const past = isToday ? data.closures.filter((c) => c.loc === loc && c.date < T && c.status !== 'CANCELLED').sort((a, b) => (b.date + b.createdAt).localeCompare(a.date + a.createdAt)).slice(0, 6) : [];
+  const pendingHere = !isToday && (Math.abs(d.drawer) >= 0.5 || d.mpPending >= 0.5);
+  const hoy = isToday ? 'hoy' : 'del ' + fdate(T);
   const sign = (v: number) => (Math.abs(v) >= 0.5 ? <span className={'num ' + (v < 0 ? 'down' : '')}>{v > 0 ? '+' : ''}{money(v)}</span> : <span className="muted">—</span>);
 
   return (
     <>
+      <div className="ds-row" style={{ gap: 6 }}>
+        <button className="ds-btn sm" onClick={() => setDay(addDays(T, -1))} aria-label="Día anterior">◀</button>
+        <input id="caja-day" type="date" value={T} max={today()} onChange={(e) => e.target.value && setDay(e.target.value)} style={{ width: 'auto' }} aria-label="Ver la caja de otro día" />
+        <button className="ds-btn sm" disabled={isToday} onClick={() => setDay(addDays(T, 1))} aria-label="Día siguiente">▶</button>
+        {!isToday && <button className="ds-btn sm ghost" onClick={() => setDay(today())}>Volver a hoy</button>}
+      </div>
+      {pendingHere && (
+        <div className="ds-panel ds-row spread" style={{ borderColor: 'var(--warn)' }}>
+          <div><b>Este día no se cerró completo.</b><div className="small muted">Quedan {money(d.drawer)} en efectivo por pasar a caja general{d.mpPending >= 0.5 ? ' y ' + money(d.mpPending) + ' de Mercado Pago por controlar' : ''}.</div></div>
+          <button className="ds-btn pri" onClick={onCloseDay}>Cerrar este día</button>
+        </div>
+      )}
       <div className="ds-grid g3">
         <Kpi label={<><span className="ds-dot" style={{ background: 'var(--cash)' }} />Efectivo</>} value={money(d.cashIn - d.cashOut)} sub={'Entró ' + money(d.cashIn) + ' · salió ' + money(d.cashOut)}>
           <div className="ds-note" style={{ marginTop: 6 }}>En el cajón tendría que haber <b className="num" style={{ color: 'var(--ink)' }}>{money(d.drawer)}</b>{d.closedCash ? ' (después del cierre)' : ''}</div>
         </Kpi>
-        <Kpi label={<><span className="ds-dot" style={{ background: 'var(--mp)' }} />Mercado Pago</>} value={money(d.mpIn)} sub={'Entró hoy' + (d.transferIn ? ' · transferencias ' + money(d.transferIn) : '') + '. Lo que pagás con Mercado Pago sale del Mercado Pago general.'} />
-        <Kpi label={<><span className="ds-dot" style={{ background: 'var(--fiado)' }} />Fiado</>} value={money(d.credit)} sub={'Fiado hoy · cobraste ' + money(d.collectedDebt) + ' de fiados'} />
+        <Kpi label={<><span className="ds-dot" style={{ background: 'var(--mp)' }} />Mercado Pago</>} value={money(d.mpIn)} sub={'Entró ' + hoy + (d.transferIn ? ' · transferencias ' + money(d.transferIn) : '') + '. Lo que pagás con Mercado Pago sale del Mercado Pago general.'} />
+        <Kpi label={<><span className="ds-dot" style={{ background: 'var(--fiado)' }} />Fiado</>} value={money(d.credit)} sub={'Fiado ' + hoy + ' · cobraste ' + money(d.collectedDebt) + ' de fiados'} />
       </div>
       <div className="ds-panel">
-        <div className="ds-panel-h"><h2>Operaciones de hoy</h2><span className="muted small">{d.salesCount} ventas · vendido {money(d.sold)}</span></div>
+        <div className="ds-panel-h"><h2>Operaciones {hoy}</h2><span className="muted small">{d.salesCount} ventas · vendido {money(d.sold)}</span></div>
         {ops.length ? (
           <div className="ds-tbl"><table>
             <thead><tr><th>Hora</th><th>Operación</th><th className="hide-m">Detalle</th><th className="r">Efectivo</th><th className="r">MP</th><th className="r">Fiado</th></tr></thead>
@@ -87,9 +118,9 @@ const CajaHoy: React.FC<{ loc: Loc; onSale: (id: string) => void; onClosure: (id
               </tr>
             ))}</tbody>
           </table></div>
-        ) : <div className="ds-empty">Todavía no hubo operaciones hoy.</div>}
+        ) : <div className="ds-empty">{isToday ? 'Todavía no hubo operaciones hoy.' : 'No hubo operaciones ese día.'}</div>}
       </div>
-      {closuresToday.length > 0 && <div className="ds-panel"><h2 style={{ marginBottom: 8 }}>Cierres de hoy</h2>{closuresToday.map((c) => <ClosureRow key={c.id} c={c} onClick={() => onClosure(c.id)} />)}</div>}
+      {closuresToday.length > 0 && <div className="ds-panel"><h2 style={{ marginBottom: 8 }}>Cierres {hoy}</h2>{closuresToday.map((c) => <ClosureRow key={c.id} c={c} onClick={() => onClosure(c.id)} />)}</div>}
       {past.length > 0 && <div className="ds-panel"><h2 style={{ marginBottom: 8 }}>Últimos cierres en {LOCS[loc]}</h2>{past.map((c) => <ClosureRow key={c.id} c={c} onClick={() => onClosure(c.id)} />)}</div>}
     </>
   );
@@ -98,7 +129,7 @@ const CajaHoy: React.FC<{ loc: Loc; onSale: (id: string) => void; onClosure: (id
 const DiffPill: React.FC<{ v: number }> = ({ v }) => (Math.abs(v) < 1 ? <span className="ds-pill p-ok">Exacto</span> : <span className={'ds-pill num ' + (v < 0 ? 'p-bad' : 'p-warn')}>{v < 0 ? 'Faltaron ' : 'Sobraron '}{money(Math.abs(v))}</span>);
 const ClosureRow: React.FC<{ c: Closure; onClick: () => void }> = ({ c, onClick }) => (
   <div className={'ds-li click ' + (c.status === 'CANCELLED' ? 'cancel' : '')} onClick={onClick}>
-    <div className="grow"><b>{fdate(c.date)}{c.time ? ' · ' + c.time : ''}</b><div className="small muted">Efectivo contado {money(c.countedCash)}{c.autoTransferId ? ' → caja general' : ''}{c.notes ? ' · ' + c.notes : ''}</div></div>
+    <div className="grow"><b>{fdate(c.date)}{c.time && !c.closedOn ? ' · ' + c.time : ''}</b><div className="small muted">{c.closedOn ? 'Aprobado el ' + fdate(c.closedOn) + ' · ' : ''}Efectivo contado {money(c.countedCash)}{c.autoTransferId ? ' → caja general' : ''}{c.notes ? ' · ' + c.notes : ''}</div></div>
     <span className="small muted">Efectivo</span><DiffPill v={c.countedCash - c.expectedCash} />
     {c.expectedMp !== undefined && <><span className="small muted hide-m">MP</span><span className="hide-m"><DiffPill v={(c.countedMp || 0) - c.expectedMp} /></span></>}
   </div>
@@ -132,11 +163,14 @@ const ClosureModal: React.FC<{ id: string; onClose: () => void }> = ({ id, onClo
   );
 };
 
-const CloseModal: React.FC<{ loc: Loc; onClose: () => void }> = ({ loc, onClose }) => {
+const CloseModal: React.FC<{ loc: Loc; date?: string; onClose: () => void }> = ({ loc, date, onClose }) => {
   const { data } = useData();
   const { run, busy } = useRun();
-  const d = useMemo(() => dayCash(data, loc, today()), [data, loc]);
-  const [cash, setCash] = useState('');
+  const day = date || today();
+  const late = day !== today();
+  const d = useMemo(() => dayCash(data, loc, day), [data, loc, day]);
+  // En un cierre pendiente la app propone el monto esperado: lo aprobás tal cual o lo corregís.
+  const [cash, setCash] = useState(late ? String(Math.round(d.drawer * 100) / 100) : '');
   const [mp, setMp] = useState(String(Math.round(d.mpPending * 100) / 100));
   const [notes, setNotes] = useState('');
   const diff = (v: string, exp: number) => {
@@ -147,23 +181,24 @@ const CloseModal: React.FC<{ loc: Loc; onClose: () => void }> = ({ loc, onClose 
   const save = () => {
     if (cash === '') return run(async () => { throw new UserError('Ingresá el efectivo que contaste.'); });
     const counted = parseAmount(cash);
-    run(() => closeCash({ loc, expectedCash: d.drawer, countedCash: counted, expectedMp: d.mpPending, countedMp: parseAmount(mp), cashIn: d.cashIn, mpIn: d.mpIn, transferIn: d.transferIn, notes }),
-      (r) => 'Caja cerrada. ' + money(counted) + ' pasaron a caja general' + (Math.abs(counted - d.drawer) >= 1 ? ' · ' + (counted < d.drawer ? 'faltaron ' : 'sobraron ') + money(Math.abs(counted - d.drawer)) + ' (anotado)' : '') + '.' + (r === 'queued' ? ' Guardado en este equipo.' : ''))
+    run(() => closeCash({ loc, expectedCash: d.drawer, countedCash: counted, expectedMp: d.mpPending, countedMp: parseAmount(mp), cashIn: d.cashIn, mpIn: d.mpIn, transferIn: d.transferIn, notes, date: day }),
+      (r) => (late ? 'Cierre del ' + fdate(day) + ' aprobado. ' : 'Caja cerrada. ') + money(counted) + ' pasaron a caja general' + (Math.abs(counted - d.drawer) >= 1 ? ' · ' + (counted < d.drawer ? 'faltaron ' : 'sobraron ') + money(Math.abs(counted - d.drawer)) + ' (anotado)' : '') + '.' + (r === 'queued' ? ' Guardado en este equipo.' : ''))
       .then((r) => { if (r) onClose(); });
   };
   return (
-    <Modal title={'Cerrar caja · ' + LOCS[loc]} onClose={onClose} wide
-      footer={<><button className="ds-btn" onClick={onClose}>Cancelar</button><button className="ds-btn pri" disabled={busy} onClick={save}>Cerrar caja</button></>}>
+    <Modal title={(late ? 'Aprobar cierre del ' + fdateL(day) : 'Cerrar caja') + ' · ' + LOCS[loc]} onClose={onClose} wide
+      footer={<><button className="ds-btn" onClick={onClose}>Cancelar</button><button className="ds-btn pri" disabled={busy} onClick={save}>{late ? 'Aprobar cierre' : 'Cerrar caja'}</button></>}>
+      {late && <div className="ds-note">Esta caja quedó sin cerrar. Los montos ya vienen cargados con lo que dice la app: si coinciden con lo que tenés, aprobá; si no, corregilos y la diferencia queda anotada.</div>}
       <div className="ds-grid g2">
         <div className="ds-panel">
           <h3>Efectivo</h3>
           <div className="ds-cmp" style={{ margin: '8px 0' }}><span>La app dice</span><b className="num">{money(d.drawer)}</b></div>
-          <label className="ds-field"><span>Contaste</span><AmountInput id="cl-cash" big autoFocus value={cash} onChange={setCash} /></label>
+          <label className="ds-field"><span>{late ? 'Efectivo de ese día que pasa a caja general' : 'Contaste'}</span><AmountInput id="cl-cash" big autoFocus value={cash} onChange={setCash} /></label>
           <div style={{ marginTop: 6 }}>{diff(cash, d.drawer)}</div>
         </div>
         <div className="ds-panel">
           <h3>Mercado Pago</h3>
-          <div className="ds-cmp" style={{ margin: '8px 0' }}><span>Entró hoy según la app</span><b className="num">{money(d.mpPending)}</b></div>
+          <div className="ds-cmp" style={{ margin: '8px 0' }}><span>{late ? 'Entró ese día según la app' : 'Entró hoy según la app'}</span><b className="num">{money(d.mpPending)}</b></div>
           <label className="ds-field"><span>Entró según la app de Mercado Pago</span><AmountInput id="cl-mp" big value={mp} onChange={setMp} /></label>
           <div style={{ marginTop: 6 }}>{diff(mp, d.mpPending)}</div>
         </div>

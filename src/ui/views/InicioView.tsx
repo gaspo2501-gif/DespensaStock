@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { LOCS, Loc, otherLoc } from '../../core/model';
-import { balances, dayCash, fdateL, lowStock, money, stockLevel, today } from '../../core/calc';
+import { balances, dayCash, fdate, fdateL, lowStock, money, stockLevel, today, unclosedDays } from '../../core/calc';
 import { useData } from '../../data/DataContext';
 import { copyText, Kpi, LocDot, useToast } from '../common';
 import type { ShellApi } from '../Shell';
@@ -18,6 +18,7 @@ export const InicioView: React.FC<{ api: ShellApi }> = ({ api }) => {
   const negatives = data.products.filter((p) => !p.archived && (p.stock.aimogasta < 0 || p.stock.olascoaga < 0));
   const noPrice = data.products.filter((p) => !p.archived && !p.price).length;
   const orderLoc = [api.loc, otherLoc(api.loc)] as Loc[];
+  const unclosed = useMemo(() => unclosedDays(data, T), [data, T]);
 
   const Col: React.FC<{ loc: Loc }> = ({ loc }) => {
     const L = lowStock(data.products, loc);
@@ -59,6 +60,12 @@ export const InicioView: React.FC<{ api: ShellApi }> = ({ api }) => {
         <div><h1>Inicio</h1><div className="muted">{fdateL(T)}</div></div>
         <button className="ds-btn pri" onClick={() => api.go('venta')}>Nueva venta</button>
       </div>
+      {unclosed.length > 0 && (
+        <div className="ds-panel ds-row spread" style={{ borderColor: 'var(--warn)' }}>
+          <div><b>{unclosed.length === 1 ? 'Hay 1 caja sin cerrar' : 'Hay ' + unclosed.length + ' cajas sin cerrar'}</b><div className="small muted">{unclosed.map((u) => fdate(u.date) + ' ' + LOCS[u.loc] + ' (' + money(u.d.drawer) + ' en efectivo)').join(' · ')}. Revisá los montos y aprobá el cierre.</div></div>
+          <button className="ds-btn pri" onClick={() => api.go('caja')}>Revisar y aprobar</button>
+        </div>
+      )}
       {negatives.length > 0 && (
         <div className="ds-panel" style={{ borderColor: 'var(--danger)' }}>
           <b style={{ color: 'var(--danger)' }}>Stock negativo para revisar:</b> {negatives.map((p) => p.name).join(', ')}.{' '}

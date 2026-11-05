@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { LOCS, Pay, Product } from '../../core/model';
-import { balances, money, parseAmount, payFromParts, payTotal, today } from '../../core/calc';
+import { balances, balanceText, money, parseAmount, payFromParts, payTotal, today } from '../../core/calc';
 import { useData } from '../../data/DataContext';
 import { createCustomer, createSale, UserError } from '../../data/ops';
 import { playScanSound } from '../../utils/audio';
@@ -254,7 +254,7 @@ export const VentaView: React.FC<{ api: ShellApi; setLocLocked: (b: boolean) => 
               <div>
                 <div className="ds-label" style={{ marginBottom: 6 }}>Fiado a nombre de</div>
                 <div className="ds-chosen"><span>{customer.name}</span><button className="ds-btn ghost sm" onClick={() => setCustomerId(null)}>Cambiar</button></div>
-                <div className="small muted" style={{ marginTop: 6 }}>Debe <b className="num">{money(bal[customer.id] || 0)}</b> · con esta venta quedará en <b className="num" style={{ color: 'var(--fiado)' }}>{money((bal[customer.id] || 0) + pay.credit)}</b></div>
+                <div className="small muted" style={{ marginTop: 6 }}>{(() => { const now = bal[customer.id] || 0; const next = now + pay.credit; return <>{now < -0.5 ? <>Tiene <b className="num" style={{ color: 'var(--cash)' }}>{money(-now)}</b> a favor</> : <>Debe <b className="num">{money(now)}</b></>} · con esta venta {next < -0.5 ? <>le quedan <b className="num" style={{ color: 'var(--cash)' }}>{money(-next)}</b> a favor</> : <>quedará debiendo <b className="num" style={{ color: 'var(--fiado)' }}>{money(Math.max(0, next))}</b></>}{now < -0.5 && pay.credit > 0 ? ' (se descuenta de su saldo a favor)' : ''}</>; })()}</div>
               </div>
             ) : (
               <div>
@@ -263,7 +263,7 @@ export const VentaView: React.FC<{ api: ShellApi; setLocLocked: (b: boolean) => 
                   {custList.map((c) => (
                     <button key={c.id} onClick={() => setCustomerId(c.id)}>
                       <span>{c.name}</span>
-                      <span className={'num small ' + ((bal[c.id] || 0) > 0.5 ? '' : 'muted')} style={(bal[c.id] || 0) > 0.5 ? { color: 'var(--fiado)', fontWeight: 700 } : undefined}>{(bal[c.id] || 0) > 0.5 ? 'Debe ' + money(bal[c.id]) : 'Sin deuda'}</span>
+                      <span className={'num small ' + (Math.abs(bal[c.id] || 0) > 0.5 ? '' : 'muted')} style={(bal[c.id] || 0) > 0.5 ? { color: 'var(--fiado)', fontWeight: 700 } : (bal[c.id] || 0) < -0.5 ? { color: 'var(--cash)', fontWeight: 700 } : undefined}>{balanceText(bal[c.id] || 0).text}</span>
                     </button>
                   ))}
                   <button onClick={() => setModal({ kind: 'newCust' })}><span style={{ color: 'var(--accent)', fontWeight: 700 }}>+ {custQ.trim() ? `Crear “${custQ.trim()}” como cliente nuevo` : 'Nuevo cliente'}</span><span /></button>

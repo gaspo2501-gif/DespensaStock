@@ -127,6 +127,7 @@ export interface SupplierPayment {
   createdAt: string;
   loc: Loc;
   fund: Fund;
+  notes?: string;
   status: Status;
 }
 
@@ -139,6 +140,8 @@ export interface Purchase {
   providerName: string;
   total: number;
   paidAmount: number;
+  /** Parte del ingreso cubierta con saldo a favor que tenías con el proveedor. */
+  creditApplied?: number;
   itemsCount: number;
   status: Status;
 }
@@ -187,6 +190,8 @@ export interface Closure {
   expectedMp?: number;
   countedMp?: number;
   autoTransferId?: string;
+  /** Cierre de un día anterior aprobado después (quedó sin cerrar ese día). */
+  closedOn?: string;
   notes: string;
   status: Status;
   rawLocation?: string;

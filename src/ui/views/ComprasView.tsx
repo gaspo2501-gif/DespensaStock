@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { DEFAULT_MARGIN, Fund, FUND_LABEL, LOCS, MARGINS, PAY_FUNDS, Product } from '../../core/model';
-import { fdate, money, parseAmount, priceFromCost, purchaseState } from '../../core/calc';
+import { fdate, money, parseAmount, priceFromCost, providerAccount, purchaseState } from '../../core/calc';
 import { useData } from '../../data/DataContext';
 import { cancelPurchase, createPurchase } from '../../data/ops';
 import { AmountInput, Icon, LocName, Modal, useRun, useToast } from '../common';
@@ -56,13 +56,15 @@ export const ComprasView: React.FC<{ api: ShellApi }> = ({ api }) => {
   const total = lines.reduce((t, l) => t + parseAmount(l.qty) * parseAmount(l.cost), 0);
   const paid = payMode === 'all' ? total : payMode === 'partial' ? parseAmount(partial) : 0;
   const provider = data.providers.find((v) => v.id === providerId);
+  const favor = providerId ? providerAccount(data, providerId).favor : 0;
+  const favorUse = Math.max(0, Math.min(favor, total - paid));
 
   const save = () => {
     if (payMode === 'partial' && !(paid > 0 && paid < total)) return toast('El pago parcial tiene que ser mayor a $0 y menor al total.', 'err');
     run(() => createPurchase({
-      providerId, providerName: provider?.name || '', loc, paid, fund: paid > 0 ? (fund || undefined) : undefined,
+      providerId, providerName: provider?.name || '', loc, paid, fund: paid > 0 ? (fund || undefined) : undefined, favor,
       lines: lines.map((l) => { const product = byId.get(l.pid)!; const cost = parseAmount(l.cost); return { product, qty: Math.round(parseAmount(l.qty)), unitCost: cost, margin: l.margin, price: parseAmount(l.price), suggested: priceFromCost(cost, l.margin) }; }),
-    }), (r) => 'Ingreso confirmado: ' + money(r.total) + (r.paid < r.total - 0.5 ? ' · queda debiendo ' + money(r.total - r.paid) : ' · pagado') + (r.queued ? ' · guardado en este equipo' : ''))
+    }), (r) => 'Ingreso confirmado: ' + money(r.total) + (r.creditApplied > 0 ? ' · se usaron ' + money(r.creditApplied) + ' de saldo a favor' : '') + (r.paid + r.creditApplied < r.total - 0.5 ? ' · queda debiendo ' + money(r.total - r.paid - r.creditApplied) : ' · pagado') + (r.queued ? ' · guardado en este equipo' : ''))
       .then((r) => { if (r) { setLines([]); setPayMode('all'); setPartial(''); setFund(''); setProviderId(''); } });
   };
 
@@ -134,7 +136,8 @@ export const ComprasView: React.FC<{ api: ShellApi }> = ({ api }) => {
               {payMode === 'partial' && <label className="ds-field"><span>¿Cuánto pagaste?</span><AmountInput id="pur-partial" value={partial} onChange={setPartial} /></label>}
               {payMode !== 'pending'
                 ? <div className="ds-field"><span>¿De dónde salió la plata? (obligatorio)</span><div className="ds-chips">{PAY_FUNDS.map((k) => <button key={k} className={'ds-chip ' + (fund === k ? 'on' : '')} onClick={() => setFund(k)}>{FUND_LABEL[k]}</button>)}</div></div>
-                : <div className="ds-note">El total queda como deuda en la cuenta del proveedor.</div>}
+                : <div className="ds-note">{favorUse > 0.5 ? (favorUse >= total - 0.5 ? 'Se cubre todo con tu saldo a favor.' : 'Se usan ' + money(favorUse) + ' de tu saldo a favor y el resto queda como deuda.') : 'El total queda como deuda en la cuenta del proveedor.'}</div>}
+              {favor > 0.5 && <div className="ds-note" style={{ color: 'var(--cash)' }}>Tenés {money(favor)} a favor con este proveedor.{payMode === 'all' ? ' Si no lo pagaste con plata, elegí “Queda pendiente” y se cubre con ese saldo.' : payMode === 'partial' && favorUse > 0.5 ? ' Se usan ' + money(favorUse) + ' para lo que no pagaste.' : ''}</div>}
             </div>
           </div>
           <div className="ds-panel soft">
