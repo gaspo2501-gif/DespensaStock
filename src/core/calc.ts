@@ -46,8 +46,15 @@ export function balances(data: DataState): Record<string, number> {
     if (!active(a)) continue;
     b[a.customerId] = (b[a.customerId] || 0) + (a.type === 'DEBT' ? a.amount : -a.amount);
   }
-  for (const k of Object.keys(b)) if (b[k] < 0.5) b[k] = Math.max(0, b[k]);
+  // Positivo = debe. Negativo = saldo a favor del cliente (pagó de más y lo dejó a cuenta).
+  for (const k of Object.keys(b)) if (Math.abs(b[k]) < 0.5) b[k] = 0;
   return b;
+}
+/** Texto corto del saldo de un cliente: "Debe $X", "A favor $X" o "Sin deuda". */
+export function balanceText(b: number): { text: string; kind: 'debe' | 'favor' | 'cero' } {
+  if (b > 0.5) return { text: 'Debe ' + money(b), kind: 'debe' };
+  if (b < -0.5) return { text: 'A favor ' + money(-b), kind: 'favor' };
+  return { text: 'Sin deuda', kind: 'cero' };
 }
 
 /* ------------------------- Stock ------------------------- */
@@ -77,7 +84,9 @@ export function providerAccount(data: DataState, providerId: string) {
   const pays = data.spays.filter((p) => p.providerId === providerId && active(p));
   const bought = sum(purchases, (p) => p.total);
   const paid = sum(pays, (p) => p.amount);
-  return { bought, paid, debt: Math.max(0, bought - paid), purchases, pays };
+  const net = bought - paid;
+  // debt: lo que le debés. favor: lo que le pagaste de más (saldo a tu favor).
+  return { bought, paid, debt: net > 0.5 ? net : 0, favor: net < -0.5 ? -net : 0, purchases, pays };
 }
 
 /* ------------------------- Caja ------------------------- */
@@ -143,8 +152,32 @@ export function generalCash(data: DataState) {
     else out(m.fund, m.amount);
   }
   const t = today();
-  const openDrawers = sum(LOC_IDS, (l) => dayCash(data, l, t).drawer);
+  const openDrawers = sum(LOC_IDS, (l) => dayCash(data, l, t).drawer) + sum(unclosedDays(data), (u) => u.d.drawer);
   return { cash, mp, transfer, total: cash + mp + transfer, openDrawers };
+}
+
+/**
+ * Días anteriores a hoy que tuvieron movimiento y quedaron sin cerrar (cierre pendiente de aprobar).
+ * Se miran desde que se usa el cierre nuevo (el primer cierre con control de MP) y como mucho 31 días.
+ */
+export function unclosedDays(data: DataState, T: string = today()): { loc: Loc; date: string; d: DayCash }[] {
+  const v2 = data.closures.filter((c) => c.expectedMp !== undefined).map((c) => c.date).sort()[0];
+  let from = addDays(T, -31);
+  if (!v2) from = addDays(T, -1); else if (v2 > from) from = v2;
+  // Cierres de la versión anterior (sin pase automático): ese día se da por cerrado.
+  const oldClosed = new Set(data.closures.filter((c) => c.status !== 'CANCELLED' && !c.autoTransferId && c.expectedMp === undefined).map((c) => c.loc + '|' + c.date));
+  const dates = new Set<string>();
+  for (const s of data.sales) if (s.date >= from && s.date < T) dates.add(s.date);
+  for (const a of data.acc) if (a.type === 'PAYMENT' && a.date >= from && a.date < T) dates.add(a.date);
+  for (const e of data.expenses) if (e.fund === 'caja_diaria' && e.date >= from && e.date < T) dates.add(e.date);
+  for (const p of data.spays) if (p.fund === 'caja_diaria' && p.date >= from && p.date < T) dates.add(p.date);
+  const out: { loc: Loc; date: string; d: DayCash }[] = [];
+  for (const date of [...dates].sort()) for (const loc of LOC_IDS) {
+    if (oldClosed.has(loc + '|' + date)) continue;
+    const d = dayCash(data, loc, date);
+    if (Math.abs(d.drawer) >= 0.5 || d.mpPending >= 0.5) out.push({ loc, date, d });
+  }
+  return out;
 }
 
 /* ------------------------- Reportes ------------------------- */

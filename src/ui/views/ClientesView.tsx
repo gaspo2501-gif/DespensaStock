@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { AccMov, LOCS, Sale } from '../../core/model';
-import { balances, fdate, money, parseAmount } from '../../core/calc';
+import { balances, balanceText, fdate, money, parseAmount } from '../../core/calc';
 import { useData } from '../../data/DataContext';
 import { registerCustomerPayment } from '../../data/ops';
 import { AmountInput, copyText, Modal, MoveLocButton, PayPills, useRun, useToast } from '../common';
@@ -34,6 +34,7 @@ export const ClientesView: React.FC<{ api: ShellApi }> = ({ api }) => {
     return m;
   }, [data.acc]);
   const total = Object.values(bal).reduce((t, v) => t + Math.max(0, v), 0);
+  const favorTotal = Object.values(bal).reduce((t, v) => t + Math.max(0, -v), 0);
   const list = data.customers
     .filter((c) => !q.trim() || c.name.toLowerCase().includes(q.trim().toLowerCase()) || c.phone.includes(q.trim()))
     .sort((a, b) => (bal[b.id] || 0) - (bal[a.id] || 0) || a.name.localeCompare(b.name, 'es'));
@@ -41,7 +42,7 @@ export const ClientesView: React.FC<{ api: ShellApi }> = ({ api }) => {
   return (
     <>
       <div className="ds-row spread">
-        <div><h1>Clientes y fiado</h1><div className="muted">Por cobrar en total: <b className="num" style={{ color: 'var(--fiado)' }}>{money(total)}</b></div></div>
+        <div><h1>Clientes y fiado</h1><div className="muted">Por cobrar en total: <b className="num" style={{ color: 'var(--fiado)' }}>{money(total)}</b>{favorTotal > 0.5 && <> · Saldo a favor de clientes: <b className="num" style={{ color: 'var(--cash)' }}>{money(favorTotal)}</b></>}</div></div>
         <button className="ds-btn pri" onClick={() => setNewCust(true)}>Nuevo cliente</button>
       </div>
       <div className="ds-panel">
@@ -56,7 +57,7 @@ export const ClientesView: React.FC<{ api: ShellApi }> = ({ api }) => {
                   <td><b>{c.name}</b></td>
                   <td className="hide-m num muted">{c.phone || '—'}</td>
                   <td className="hide-m muted">{lm ? fdate(lm.date.slice(0, 10)) + ' · ' + (lm.type === 'DEBT' ? 'Fiado' : 'Pago') : '—'}</td>
-                  <td className="r num" style={b > 0.5 ? { color: 'var(--fiado)', fontWeight: 700 } : undefined}>{b > 0.5 ? money(b) : 'Sin deuda'}</td>
+                  <td className="r num" style={b > 0.5 ? { color: 'var(--fiado)', fontWeight: 700 } : b < -0.5 ? { color: 'var(--cash)', fontWeight: 700 } : undefined}>{b > 0.5 ? money(b) : balanceText(b).text}</td>
                   <td className="r">{b > 0.5 && <button className="ds-btn sm" onClick={(e) => { e.stopPropagation(); setCollect(c.id); }}>Cobrar</button>}</td>
                 </tr>
               );
@@ -93,9 +94,15 @@ const CustomerDetail: React.FC<{ id: string; onClose: () => void; onCollect: () 
   return (
     <Modal title={c.name} onClose={onClose} wide>
       <div className="ds-row spread">
-        <div className="ds-kpi"><span className="ds-label">Debe</span><span className="v num" style={{ color: 'var(--fiado)' }}>{money(b)}</span></div>
-        {b > 0.5 && <div className="ds-row"><button className="ds-btn pri" onClick={onCollect}>Cobrar</button><button className="ds-btn" onClick={() => copyText(msg, toast)}>Copiar recordatorio con el detalle</button></div>}
+        {b < -0.5
+          ? <div className="ds-kpi"><span className="ds-label">Saldo a favor</span><span className="v num" style={{ color: 'var(--cash)' }}>{money(-b)}</span></div>
+          : <div className="ds-kpi"><span className="ds-label">Debe</span><span className="v num" style={{ color: 'var(--fiado)' }}>{money(b)}</span></div>}
+        <div className="ds-row">
+          <button className={'ds-btn ' + (b > 0.5 ? 'pri' : '')} onClick={onCollect}>{b > 0.5 ? 'Cobrar' : 'Dejar plata a cuenta'}</button>
+          {b > 0.5 && <button className="ds-btn" onClick={() => copyText(msg, toast)}>Copiar recordatorio con el detalle</button>}
+        </div>
       </div>
+      {b < -0.5 && <div className="ds-note">Tiene {money(-b)} a favor. Cuando lleve algo, cobralo como <b>Fiado</b> a su nombre y se descuenta solo de este saldo.</div>}
       {c.phone && <div className="small muted">Teléfono: <span className="num" style={{ userSelect: 'all' }}>{c.phone}</span></div>}
       <div className="small muted">Tocá un fiado para ver qué llevó. Los pagos se descuentan de los fiados más viejos primero.</div>
       <div className="ds-tbl"><table>
@@ -111,7 +118,7 @@ const CustomerDetail: React.FC<{ id: string; onClose: () => void; onCollect: () 
                 <td className="num">{fdate(a.date)}{s?.time ? <div className="small muted">{s.time}</div> : null}</td>
                 <td>
                   {a.type === 'DEBT' ? <><span className="ds-pill p-fi">Fiado</span> <span className="small muted">{isOpen ? '▾' : '▸'} {s ? s.items.length + (s.items.length === 1 ? ' producto' : ' productos') : (a.description || 'sin detalle')}</span></>
-                    : <><span className="ds-pill p-ok">Pago</span> <PayPills pay={a.pay} /></>}
+                    : <><span className="ds-pill p-ok">Pago</span> <PayPills pay={a.pay} />{/a favor/.test(a.description || '') && <div className="small muted">{a.description}</div>}</>}
                   {a.type === 'DEBT' && !isOpen && s && <div className="small muted trunc" style={{ maxWidth: 360 }}>{itemsText(s)}</div>}
                 </td>
                 <td className="muted">{LOCS[a.loc]}{a.type === 'PAYMENT' && !cancelled && <> <MoveLocButton col="account_movements" id={a.id} loc={a.loc} /></>}</td>
@@ -145,7 +152,7 @@ const CollectModal: React.FC<{ id: string; loc: 'aimogasta' | 'olascoaga'; onClo
   const { run, busy } = useRun();
   const c = data.customers.find((x) => x.id === id)!;
   const b = balances(data)[id] || 0;
-  const [amount, setAmount] = useState(String(Math.round(b * 100) / 100));
+  const [amount, setAmount] = useState(b > 0.5 ? String(Math.round(b * 100) / 100) : '');
   const [mode, setMode] = useState<'cash' | 'mp' | 'mixed'>('cash');
   const [cash, setCash] = useState('');
   const [mp, setMp] = useState('');
@@ -153,13 +160,13 @@ const CollectModal: React.FC<{ id: string; loc: 'aimogasta' | 'olascoaga'; onClo
   const parts = mode === 'mixed' ? parseAmount(cash) + parseAmount(mp) : a;
   const save = () => run(
     () => registerCustomerPayment({ customerId: id, amount: a, cash: mode === 'cash' ? a : mode === 'mixed' ? parseAmount(cash) : 0, mp: mode === 'mp' ? a : mode === 'mixed' ? parseAmount(mp) : 0, balance: b, loc }),
-    (r) => `Cobro registrado: ${money(a)}. Le queda ${money(Math.max(0, b - a))}.` + (r === 'queued' ? ' (guardado en este equipo)' : ''),
+    (r) => `Cobro registrado: ${money(a)}. ` + (b - a < -0.5 ? `Queda ${money(a - b)} a favor del cliente.` : `Le queda ${money(Math.max(0, b - a))}.`) + (r === 'queued' ? ' (guardado en este equipo)' : ''),
   ).then((r) => { if (r) onClose(); });
   return (
-    <Modal title={'Cobrar a ' + c.name} onClose={onClose}
+    <Modal title={(b > 0.5 ? 'Cobrar a ' : 'Plata a cuenta de ') + c.name} onClose={onClose}
       footer={<><button className="ds-btn" onClick={onClose}>Cancelar</button><button className="ds-btn pri" disabled={busy} onClick={save}>Registrar cobro</button></>}>
       <label className="ds-field"><span>Importe que paga</span><AmountInput id="col-amt" big autoFocus value={amount} onChange={setAmount} /></label>
-      <div className="ds-chips"><button className="ds-chip" onClick={() => setAmount(String(Math.round(b * 100) / 100))}>Saldar todo ({money(b)})</button></div>
+      {b > 0.5 && <div className="ds-chips"><button className="ds-chip" onClick={() => setAmount(String(Math.round(b * 100) / 100))}>Saldar todo ({money(b)})</button></div>}
       <div>
         <div className="ds-label" style={{ marginBottom: 6 }}>¿Cómo paga?</div>
         <div className="ds-chips">{([['cash', 'Efectivo'], ['mp', 'Mercado Pago'], ['mixed', 'Efectivo + MP']] as const).map(([m, l]) => <button key={m} className={'ds-chip ' + (mode === m ? 'on' : '')} onClick={() => setMode(m)}>{l}</button>)}</div>
@@ -172,12 +179,14 @@ const CollectModal: React.FC<{ id: string; loc: 'aimogasta' | 'olascoaga'; onClo
       )}
       <div className="ds-note">
         <div className="ds-cmp">
-          <span>Debía</span><b className="num">{money(b)}</b>
+          <span>{b < -0.5 ? 'Ya tenía a favor' : 'Debía'}</span><b className="num">{money(Math.abs(b))}</b>
           <span>Paga</span><b className="num">{money(a)}</b>
-          <span>Le queda</span><b className="num" style={{ color: 'var(--fiado)' }}>{money(Math.max(0, b - a))}</b>
+          {b - a < -0.5
+            ? <><span>Queda a favor del cliente</span><b className="num" style={{ color: 'var(--cash)' }}>{money(a - b)}</b></>
+            : <><span>Le queda</span><b className="num" style={{ color: 'var(--fiado)' }}>{money(Math.max(0, b - a))}</b></>}
           {mode === 'mixed' && <><span>Efectivo + MP</span><b className={'num ' + (Math.abs(parts - a) < 1 ? 'diff0' : 'diffx')}>{money(parts)}</b></>}
         </div>
-        {a > b + 0.5 && <div style={{ color: 'var(--danger)', marginTop: 6 }}>El pago no puede superar lo que debe.</div>}
+        {a > Math.max(0, b) + 0.5 && <div style={{ color: 'var(--cash)', marginTop: 6 }}>{b > 0.5 ? 'Paga de más: ' + money(a - b) + ' quedan a cuenta, como saldo a favor.' : 'Todo queda a cuenta, como saldo a favor.'}</div>}
         <div className="small" style={{ marginTop: 6 }}>Se registra en {LOCS[loc]}.</div>
       </div>
     </Modal>

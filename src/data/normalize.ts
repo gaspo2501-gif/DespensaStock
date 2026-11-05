@@ -160,7 +160,7 @@ export function normSupplierPayment(id: string, d: Raw): SupplierPayment {
   return {
     id, providerId: d.providerId || '', providerName: d.providerName || 'Proveedor', purchaseId: d.purchaseId || undefined,
     amount: n(d.amount), date: dateOf(d), createdAt: createdIso(d), loc: locOf(d.locationId),
-    fund: normalizeFundName(d.paidFrom) || 'caja_diaria', status: statusOf(d),
+    fund: normalizeFundName(d.paidFrom) || 'caja_diaria', notes: d.notes || '', status: statusOf(d),
   };
 }
 
@@ -169,7 +169,7 @@ export function normPurchase(id: string, d: Raw): Purchase {
   const paid = d.paidAmount !== undefined ? n(d.paidAmount) : d.paymentStatus === 'PAID' ? total : 0;
   return {
     id, date: dateOf(d), createdAt: createdIso(d), loc: locOf(d.locationId), providerId: d.providerId || '',
-    providerName: d.providerName || 'Proveedor', total, paidAmount: paid, itemsCount: n(d.totalItemsCount ?? d.itemsCount),
+    providerName: d.providerName || 'Proveedor', total, paidAmount: paid, creditApplied: typeof d.creditApplied === 'number' ? d.creditApplied : undefined, itemsCount: n(d.totalItemsCount ?? d.itemsCount),
     status: statusOf(d),
   };
 }
@@ -203,6 +203,6 @@ export function normClosure(id: string, d: Raw): Closure {
     id, date: dateOf(d), time: timeOf(created), createdAt: created, loc: locOf(d.locationId), expectedCash: n(d.expectedCash),
     countedCash: n(d.countedCash), expectedMp: typeof d.expectedMp === 'number' ? d.expectedMp : undefined,
     countedMp: typeof d.countedMp === 'number' ? d.countedMp : undefined, autoTransferId: d.autoTransferId || undefined,
-    notes: d.notes || '', status: statusOf(d), rawLocation: d.locationId,
+    closedOn: d.lateClosure && typeof d.closedOn === 'string' ? d.closedOn : undefined, notes: d.notes || '', status: statusOf(d), rawLocation: d.locationId,
   };
 }

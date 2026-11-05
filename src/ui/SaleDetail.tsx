@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { LOCS, Loc, otherLoc, Sale } from '../core/model';
-import { balances, fdate, money, parseAmount, payFromParts, payTotal } from '../core/calc';
+import { balances, balanceText, fdate, money, parseAmount, payFromParts, payTotal } from '../core/calc';
 import { useData } from '../data/DataContext';
 import { cancelSale, changeSaleLocation, changeSalePayment } from '../data/ops';
 import { BarcodeScanner } from '../components/scanner/BarcodeScanner';
@@ -133,7 +133,7 @@ const ChangePayment: React.FC<{ sale: Sale }> = ({ sale }) => {
       ) : (
         <div>
           <label className="ds-field"><span>Cliente para el fiado (obligatorio)</span><input id="cp-cust" type="search" autoComplete="off" placeholder="Escribí el nombre" value={custQ} onChange={(e) => setCustQ(e.target.value)} /></label>
-          <div className="ds-cust-pick" style={{ marginTop: 6 }}>{custList.map((c) => <button key={c.id} onClick={() => setCustomerId(c.id)}><span>{c.name}</span><span className="small muted num">{(bal[c.id] || 0) > 0.5 ? 'Debe ' + money(bal[c.id]) : 'Sin deuda'}</span></button>)}</div>
+          <div className="ds-cust-pick" style={{ marginTop: 6 }}>{custList.map((c) => <button key={c.id} onClick={() => setCustomerId(c.id)}><span>{c.name}</span><span className="small muted num">{balanceText(bal[c.id] || 0).text}</span></button>)}</div>
         </div>
       ))}
       <label className="ds-field"><span>Motivo (opcional)</span><input id="cp-reason" type="text" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Ej: se marcó efectivo y pagó con Mercado Pago" /></label>

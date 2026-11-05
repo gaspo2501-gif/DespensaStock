@@ -4,7 +4,7 @@
  * Reglas de compatibilidad:
  * - Se escriben los mismos documentos, colecciones y campos que usaba la app anterior.
  * - Solo se agregan campos opcionales (unitCost, margin, minStockAlert, archived, expectedMp, countedMp,
- *   autoTransferId, closureId, paymentBreakdown en cobros combinados).
+ *   autoTransferId, closureId, paymentBreakdown en cobros combinados, creditApplied, lateClosure).
  * - Nunca se borra un documento: se anula (status: 'CANCELLED') o se archiva.
  * - Si Firestore rechaza una escritura con conexión, el error llega a la pantalla (no se muestra "guardado").
  */
@@ -14,7 +14,7 @@ import {
 import { db } from '../services/firebase/config';
 import { getArgentinaToday } from '../utils/dateUtils';
 import { Customer, Fund, Loc, LOCS, Pay, Product, Purchase } from '../core/model';
-import { payTotal, saleMethodFor } from '../core/calc';
+import { money as fmt, payTotal, saleMethodFor } from '../core/calc';
 import { isOnline, runWrite } from './sync';
 import { salesService } from '../services/firebase/salesService';
 import { expenseService } from '../services/firebase/expenseService';
@@ -162,12 +162,7 @@ export async function changeSalePayment(args: { saleId: string; pay: Pay; custom
     for (const m of cashSnap.docs) { const x = await tx.get(m.ref); if (x.exists() && x.data().sourceType === 'SALE' && x.data().status !== 'CANCELLED') cash.push(x); }
     const oldCredit = debts.reduce((t, x) => t + (Number(x.data().amount) || 0), 0);
     const oldCustomer = d.customerId || (debts[0] && debts[0].data().customerId);
-    // No permitir quitar un fiado que el cliente ya empezó a pagar (quedaría saldo a favor sin control).
-    if (oldCredit > 0 && typeof args.customerBalance === 'number') {
-      const sameCustomer = customer && customer.id === oldCustomer;
-      const stays = sameCustomer ? pay.credit : 0;
-      if (args.customerBalance - oldCredit + stays < -0.5) throw new UserError('No se puede quitar ese fiado: el cliente ya pagó parte de la deuda. Registralo como un cobro.');
-    }
+    // Si se quita un fiado que el cliente ya había pagado, lo pagado queda como saldo a favor del cliente.
     const method = saleMethodFor(pay);
     const before = { paymentMethod: d.paymentMethod || 'cash', paymentBreakdown: d.paymentBreakdown || null, customerId: d.customerId || null };
     const after = { paymentMethod: method, paymentBreakdown: method === 'mixed' ? { cash: pay.cash, mercado_pago: pay.mp, transfer: pay.transfer, credit: pay.credit } : null, customerId: pay.credit > 0 && customer ? customer.id : null };
@@ -266,12 +261,13 @@ export async function createCustomer(name: string, phone: string): Promise<Custo
 export async function registerCustomerPayment(args: { customerId: string; amount: number; cash: number; mp: number; balance: number; loc: Loc }) {
   const { customerId, amount, cash, mp, balance, loc } = args;
   if (!(amount > 0)) throw new UserError('Ingresá cuánto paga.');
-  if (amount > balance + 0.5) throw new UserError('El pago no puede superar lo que debe.');
   if (Math.abs(cash + mp - amount) >= 1) throw new UserError('Efectivo y Mercado Pago tienen que sumar lo que paga.');
   const id = `mov_pay_${Date.now()}_${rnd()}`;
   const method = cash > 0 && mp > 0 ? 'mixed' : mp > 0 ? 'mercado_pago' : 'cash';
+  const extra = amount - Math.max(0, balance);
   const payload: Record<string, any> = {
-    id, customerId, type: 'PAYMENT', amount, paymentMethod: method, locationId: loc, description: 'Pago a cuenta',
+    id, customerId, type: 'PAYMENT', amount, paymentMethod: method, locationId: loc,
+    description: extra > 0.5 ? (balance > 0.5 ? 'Pago a cuenta (deja ' + fmt(extra) + ' a favor)' : 'Plata dejada a cuenta (a favor)') : 'Pago a cuenta',
     createdAtIso: nowIso(), createdAt: ts(),
   };
   if (method === 'mixed') payload.paymentBreakdown = { cash, mercado_pago: mp };
@@ -360,7 +356,7 @@ export async function transferStock(p: Product, from: Loc, qty: number) {
 /* ============================ COMPRAS ============================ */
 export interface PurchaseLine { product: Product; qty: number; unitCost: number; margin: number; price: number; suggested: number }
 
-export async function createPurchase(args: { providerId: string; providerName: string; loc: Loc; lines: PurchaseLine[]; paid: number; fund?: Fund }) {
+export async function createPurchase(args: { providerId: string; providerName: string; loc: Loc; lines: PurchaseLine[]; paid: number; fund?: Fund; favor?: number }) {
   const { providerId, providerName, loc, lines, paid, fund } = args;
   if (!providerId) throw new UserError('Elegí el proveedor.');
   if (!lines.length) throw new UserError('Agregá al menos un producto.');
@@ -371,14 +367,18 @@ export async function createPurchase(args: { providerId: string; providerName: s
   if (paid > 0 && !fund) throw new UserError('Elegí de dónde salió la plata del pago.');
   const iso = nowIso(); const date = getArgentinaToday();
   const purchaseId = `purch_${Date.now()}_${rnd()}`;
-  const pending = Math.max(0, total - paid);
-  const status = pending <= 0.5 ? 'PAID' : paid > 0 ? 'PARTIAL' : 'PENDING';
+  // Si tenías saldo a favor con el proveedor, cubre lo que queda pendiente (no mueve plata: ya se pagó antes).
+  const creditApplied = Math.max(0, Math.min(args.favor || 0, total - paid));
+  const covered = paid + creditApplied;
+  const pending = Math.max(0, total - covered);
+  const status = pending <= 0.5 ? 'PAID' : covered > 0 ? 'PARTIAL' : 'PENDING';
   const b = writeBatch(db);
   const pur: Record<string, any> = {
     id: purchaseId, date, providerId, providerName, createdAt: ts(), createdAtIso: iso, totalAmount: total,
     totalItemsCount: lines.reduce((t, l) => t + l.qty, 0), itemsCount: lines.length, locationId: loc,
-    paymentStatus: status, paidAmount: paid, pendingAmount: pending,
+    paymentStatus: status, paidAmount: covered, pendingAmount: pending,
   };
+  if (creditApplied > 0) pur.creditApplied = creditApplied;
   if (paid > 0 && fund) pur.paidFrom = fund;
   b.set(doc(db, 'purchases', purchaseId), pur);
   for (const l of lines) {
@@ -405,7 +405,7 @@ export async function createPurchase(args: { providerId: string; providerName: s
     });
   }
   const r = await runWrite(() => b.commit());
-  return { purchaseId, total, paid, queued: r === 'queued' };
+  return { purchaseId, total, paid, creditApplied, queued: r === 'queued' };
 }
 
 export async function cancelPurchase(purchaseId: string, reason: string) {
@@ -460,7 +460,6 @@ export async function payProvider(args: { providerId: string; providerName: stri
   const { providerId, providerName, amount, fund, loc, debt, purchases } = args;
   if (!isOnline()) throw new UserError('Para registrar un pago a proveedor hace falta conexión.');
   if (!(amount > 0)) throw new UserError('Ingresá el importe.');
-  if (amount > debt + 0.5) throw new UserError('El pago supera la deuda con el proveedor.');
   if (!fund) throw new UserError('Elegí de dónde sale la plata.');
   const open = purchases.filter((p) => p.status !== 'CANCELLED' && p.total - p.paidAmount > 0.5).sort((a, b) => (a.createdAt || a.date).localeCompare(b.createdAt || b.date));
   const iso = nowIso(); const date = getArgentinaToday();
@@ -480,7 +479,7 @@ export async function payProvider(args: { providerId: string; providerName: stri
     });
     if (left > 0.5) {
       const sid = `spay_${Date.now()}_${rnd()}`;
-      tx.set(doc(db, 'supplier_payments', sid), { id: sid, providerId, providerName, amount: left, date, paidFrom: fund, locationId: loc, notes: 'Pago a cuenta', createdAtIso: iso, createdAt: ts() });
+      tx.set(doc(db, 'supplier_payments', sid), { id: sid, providerId, providerName, amount: left, date, paidFrom: fund, locationId: loc, notes: debt > 0.5 ? 'Pago a cuenta (queda a favor)' : 'Pago adelantado (queda a favor)', createdAtIso: iso, createdAt: ts() });
     }
   });
   return true;
@@ -569,10 +568,13 @@ export async function setRecordLocation(col: 'expenses' | 'cash_movements' | 'ca
  * Cierre de caja: guarda el arqueo (efectivo y Mercado Pago) y pasa solo el efectivo contado a caja general.
  * El pase usa el mismo tipo de movimiento que ya usaba la app ("Pase de recaudación a Caja General").
  */
-export async function closeCash(args: { loc: Loc; expectedCash: number; countedCash: number; expectedMp: number; countedMp: number; cashIn: number; mpIn: number; transferIn: number; notes: string }) {
+export async function closeCash(args: { loc: Loc; expectedCash: number; countedCash: number; expectedMp: number; countedMp: number; cashIn: number; mpIn: number; transferIn: number; notes: string; date?: string }) {
   const { loc, expectedCash, countedCash, expectedMp, countedMp, notes } = args;
   if (!(countedCash >= 0)) throw new UserError('Ingresá el efectivo que contaste.');
-  const iso = nowIso(); const date = getArgentinaToday();
+  const iso = nowIso(); const todayStr = getArgentinaToday();
+  // Cierre de un día anterior que quedó sin cerrar: se guarda con la fecha de ese día.
+  const date = args.date && /^\d{4}-\d{2}-\d{2}$/.test(args.date) && args.date < todayStr ? args.date : todayStr;
+  const late = date !== todayStr;
   const closureId = `closure_${Date.now()}_${rnd()}`;
   const transferId = countedCash > 0 ? `mov_trans_gen_${Date.now()}_${rnd()}` : '';
   const b = writeBatch(db);
@@ -582,12 +584,13 @@ export async function closeCash(args: { loc: Loc; expectedCash: number; countedC
     totalCollected: args.cashIn + args.mpIn + args.transferIn, expectedMp, countedMp,
   };
   if (transferId) closure.autoTransferId = transferId;
+  if (late) { closure.lateClosure = true; closure.closedOn = todayStr; }
   b.set(doc(db, 'cash_closures', closureId), closure);
   if (transferId) {
     b.set(doc(db, 'cash_movements', transferId), {
       id: transferId, type: 'EXPENSE', amount: countedCash, paymentMethod: 'cash', description: 'Pase de recaudación a Caja General (cierre de caja)',
       date, sourceType: 'INTERNAL_TRANSFER', sourceId: transferId, locationId: loc, originFund: 'caja_diaria', destinationFund: 'caja_general',
-      cashRegisterType: 'caja_general', paidFrom: 'caja_diaria', closureId, notes: 'Pase automático al cerrar la caja', createdAtIso: iso, createdAt: ts(),
+      cashRegisterType: 'caja_general', paidFrom: 'caja_diaria', closureId, notes: late ? 'Pase al aprobar el cierre pendiente del ' + date.split('-').reverse().join('/') : 'Pase automático al cerrar la caja', createdAtIso: iso, createdAt: ts(),
     });
   }
   return runWrite(() => b.commit());
