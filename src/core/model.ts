@@ -197,6 +197,19 @@ export interface Closure {
   rawLocation?: string;
 }
 
+export interface StockTransfer {
+  id: string;
+  /** Traspasos hechos juntos comparten groupId (los viejos, de a un producto, no lo tienen). */
+  groupId?: string;
+  date: string;
+  createdAt: string;
+  productId: string;
+  productName: string;
+  qty: number;
+  from: Loc;
+  to: Loc;
+}
+
 export interface DataState {
   products: Product[];
   customers: Customer[];
@@ -209,9 +222,10 @@ export interface DataState {
   expenses: Expense[];
   cashMovs: CashMov[];
   closures: Closure[];
+  transfers: StockTransfer[];
 }
 
 export const emptyData = (): DataState => ({
   products: [], customers: [], providers: [], sales: [], acc: [], purchases: [], purchaseItems: [],
-  spays: [], expenses: [], cashMovs: [], closures: [],
+  spays: [], expenses: [], cashMovs: [], closures: [], transfers: [],
 });
