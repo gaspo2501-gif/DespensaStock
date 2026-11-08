@@ -14,6 +14,7 @@ const PATHS: Record<string, string> = {
   caja: 'M5 6h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2zM3 10h18M16 15h2',
   reportes: 'M4 20V10M10 20V4M16 20v-7M22 20H2',
   mas: 'M5 12h.01M12 12h.01M19 12h.01',
+  traspaso: 'M4 8h13M13 4l4 4-4 4M20 16H7M11 12l-4 4 4 4',
   scan: 'M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M11 8v8M15 8v8M18 8v8',
 };
 export const Icon: React.FC<{ name: string; size?: number }> = ({ name, size = 18 }) => (

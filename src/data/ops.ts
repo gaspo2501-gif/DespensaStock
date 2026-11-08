@@ -353,6 +353,41 @@ export async function transferStock(p: Product, from: Loc, qty: number) {
   return true;
 }
 
+/** Traspaso de varios productos juntos: se valida todo y se guarda todo junto, o no se guarda nada. */
+export async function transferStockBatch(args: { from: Loc; lines: { product: Product; qty: number }[] }) {
+  const { from, lines } = args;
+  if (!isOnline()) throw new UserError('Para pasar stock entre sucursales hace falta conexión.');
+  if (!lines.length) throw new UserError('Agregá al menos un producto.');
+  if (lines.length > 200) throw new UserError('Son demasiados productos para un solo traspaso. Hacelo en dos partes.');
+  const bad = lines.find((l) => !(l.qty > 0) || Math.round(l.qty) !== l.qty);
+  if (bad) throw new UserError(`Revisá la cantidad de “${bad.product.name}”.`);
+  const to: Loc = from === 'aimogasta' ? 'olascoaga' : 'aimogasta';
+  const groupId = `tgroup_${Date.now()}_${rnd()}`;
+  const date = getArgentinaToday(); const iso = nowIso();
+  await runTransaction(db, async (tx: any) => {
+    const refs = lines.map((l) => doc(db, 'products', l.product.id));
+    const snaps: any[] = [];
+    for (const r of refs) snaps.push(await tx.get(r));
+    const stocks = snaps.map((s: any, i: number) => {
+      if (!s.exists()) throw new UserError(`No se encontró “${lines[i].product.name}”.`);
+      const st = rawStock(s.data());
+      if (st[from] < lines[i].qty) throw new UserError(`“${lines[i].product.name}”: en ${LOCS[from]} hay ${st[from]} y querés pasar ${lines[i].qty}.`);
+      return st;
+    });
+    lines.forEach((l, i) => {
+      const st = stocks[i];
+      tx.update(refs[i], { ...fullStockUpdate({ ...st, [from]: st[from] - l.qty, [to]: st[to] + l.qty }), updatedAt: ts() });
+      const id = `trans_${Date.now()}_${i}_${rnd()}`;
+      tx.set(doc(db, 'stock_transfers', id), {
+        id, groupId, date, productId: l.product.id, barcode: l.product.barcode, productName: l.product.name, quantity: l.qty,
+        sourceLocationId: from, sourceLocationName: LOCS[from], destinationLocationId: to, destinationLocationName: LOCS[to],
+        notes: '', createdAtIso: iso, createdAt: ts(),
+      });
+    });
+  });
+  return { count: lines.length, units: lines.reduce((t, l) => t + l.qty, 0), to };
+}
+
 /* ============================ COMPRAS ============================ */
 export interface PurchaseLine { product: Product; qty: number; unitCost: number; margin: number; price: number; suggested: number }
 

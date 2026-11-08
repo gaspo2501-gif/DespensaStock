@@ -8,15 +8,16 @@ import { InicioView } from './views/InicioView';
 import { VentaView } from './views/VentaView';
 import { ClientesView } from './views/ClientesView';
 import { StockView } from './views/StockView';
+import { TraspasoView } from './views/TraspasoView';
 import { ComprasView } from './views/ComprasView';
 import { ProveedoresView } from './views/ProveedoresView';
 import { CajaView } from './views/CajaView';
 import { ReportesView } from './views/ReportesView';
 
-export type View = 'inicio' | 'venta' | 'clientes' | 'stock' | 'compras' | 'proveedores' | 'caja' | 'reportes';
+export type View = 'inicio' | 'venta' | 'clientes' | 'stock' | 'traspaso' | 'compras' | 'proveedores' | 'caja' | 'reportes';
 const NAV: [View, string, string?][] = [
   ['inicio', 'Inicio'], ['venta', 'Venta', 'F1'], ['clientes', 'Clientes y fiado'], ['stock', 'Stock'],
-  ['compras', 'Ingreso de mercadería'], ['proveedores', 'Proveedores'], ['caja', 'Caja'], ['reportes', 'Reportes'],
+  ['traspaso', 'Traspaso de stock'], ['compras', 'Ingreso de mercadería'], ['proveedores', 'Proveedores'], ['caja', 'Caja'], ['reportes', 'Reportes'],
 ];
 const BOTTOM: View[] = ['inicio', 'venta', 'stock', 'caja'];
 const LOC_KEY = 'despensa_stock_active_location_id';
@@ -97,6 +98,7 @@ const ShellInner: React.FC = () => {
                 {view === 'venta' && <VentaView api={api} setLocLocked={setBusyLoc} />}
                 {view === 'clientes' && <ClientesView api={api} />}
                 {view === 'stock' && <StockView api={api} />}
+                {view === 'traspaso' && <TraspasoView api={api} />}
                 {view === 'compras' && <ComprasView api={api} />}
                 {view === 'proveedores' && <ProveedoresView api={api} />}
                 {view === 'caja' && <CajaView api={api} />}
@@ -115,7 +117,7 @@ const ShellInner: React.FC = () => {
       {more && (
         <Modal title="Más secciones" onClose={() => setMore(false)}>
           <div className="ds-list">
-            {(['clientes', 'compras', 'proveedores', 'reportes'] as View[]).map((k) => (
+            {(['clientes', 'traspaso', 'compras', 'proveedores', 'reportes'] as View[]).map((k) => (
               <button key={k} className="ds-btn" style={{ justifyContent: 'flex-start' }} onClick={() => go(k)}><Icon name={k} size={20} />{NAV.find((n) => n[0] === k)![1]}</button>
             ))}
             <button className="ds-btn ghost" disabled={backingUp} onClick={backup}>Descargar copia de seguridad</button>

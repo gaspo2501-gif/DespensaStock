@@ -4,12 +4,12 @@ import { db } from '../services/firebase/config';
 import { DataState, emptyData } from '../core/model';
 import {
   normAcc, normCashMov, normClosure, normCustomer, normExpense, normProduct, normProvider, normPurchase,
-  normPurchaseItem, normSale, normSupplierPayment,
+  normPurchaseItem, normSale, normSupplierPayment, normTransfer,
 } from './normalize';
 import { subscribeSync, SyncState, getSyncState } from './sync';
 
 type Key = keyof DataState;
-const SOURCES: { key: Key; col: string; norm: (id: string, d: any) => any }[] = [
+const SOURCES: { key: Key; col: string; norm: (id: string, d: any) => any; optional?: boolean }[] = [
   { key: 'products', col: 'products', norm: normProduct },
   { key: 'customers', col: 'customers', norm: normCustomer },
   { key: 'providers', col: 'providers', norm: normProvider },
@@ -21,6 +21,8 @@ const SOURCES: { key: Key; col: string; norm: (id: string, d: any) => any }[] = 
   { key: 'expenses', col: 'expenses', norm: normExpense },
   { key: 'cashMovs', col: 'cash_movements', norm: normCashMov },
   { key: 'closures', col: 'cash_closures', norm: normClosure },
+  // Solo para mostrar el historial de traspasos: si no se puede leer, la app sigue igual.
+  { key: 'transfers', col: 'stock_transfers', norm: normTransfer, optional: true },
 ];
 
 interface Ctx { data: DataState; loaded: boolean; error: string | null; sync: SyncState }
@@ -35,7 +37,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => subscribeSync(setSync), []);
 
   useEffect(() => {
-    const unsubs = SOURCES.map(({ key, col, norm }) =>
+    const unsubs = SOURCES.map(({ key, col, norm, optional }) =>
       onSnapshot(
         collection(db, col),
         (snap: any) => {
@@ -47,7 +49,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         },
         (err: any) => {
           console.error('Error leyendo ' + col, err);
-          setError('No se pudo leer la base de datos (' + col + '). ' + (err?.code === 'permission-denied' ? 'Revisá las reglas de Firestore.' : 'Revisá la conexión.'));
+          if (!optional) setError('No se pudo leer la base de datos (' + col + '). ' + (err?.code === 'permission-denied' ? 'Revisá las reglas de Firestore.' : 'Revisá la conexión.'));
           setReady((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
         }
       )

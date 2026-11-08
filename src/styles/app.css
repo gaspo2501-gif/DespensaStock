@@ -189,3 +189,10 @@ details summary{cursor:pointer;font-weight:600}
   .ds-root h1{font-size:1.35rem}
 }
 @media (prefers-reduced-motion:no-preference){.ds-toast{animation:ds-tin .2s ease-out}@keyframes ds-tin{from{transform:translateY(8px);opacity:.3}to{transform:none;opacity:1}}}
+
+/* Traspaso de stock */
+.ds-tdir{align-items:flex-end;gap:12px}
+.ds-tloc{display:flex;align-items:center;gap:6px;font-size:1.15rem;font-family:var(--f-display);padding:6px 0}
+.ds-tline .ds-row input{width:80px!important;min-width:0;flex:none;text-align:center}
+input.bad{border-color:var(--danger)!important;background:var(--danger-soft)}
+@media (max-width:640px){.ds-tline{flex-wrap:wrap}.ds-tline .grow{flex-basis:100%}}

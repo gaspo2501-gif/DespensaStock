@@ -4,7 +4,7 @@
  */
 import {
   AccMov, CashMov, Closure, Customer, DEFAULT_MIN_STOCK, Expense, Fund, Loc, Pay, Product, Provider,
-  Purchase, PurchaseItem, Sale, SaleItem, Status, SupplierPayment, emptyPay,
+  Purchase, PurchaseItem, Sale, SaleItem, Status, StockTransfer, SupplierPayment, emptyPay,
 } from '../core/model';
 import { getArgentinaToday, toArgentinaDateString } from '../utils/dateUtils';
 
@@ -204,5 +204,15 @@ export function normClosure(id: string, d: Raw): Closure {
     countedCash: n(d.countedCash), expectedMp: typeof d.expectedMp === 'number' ? d.expectedMp : undefined,
     countedMp: typeof d.countedMp === 'number' ? d.countedMp : undefined, autoTransferId: d.autoTransferId || undefined,
     closedOn: d.lateClosure && typeof d.closedOn === 'string' ? d.closedOn : undefined, notes: d.notes || '', status: statusOf(d), rawLocation: d.locationId,
+  };
+}
+
+export function normTransfer(id: string, d: Raw): StockTransfer | null {
+  const from = d.sourceLocationId === 'olascoaga' ? 'olascoaga' : d.sourceLocationId === 'aimogasta' ? 'aimogasta' : null;
+  const to = d.destinationLocationId === 'olascoaga' ? 'olascoaga' : d.destinationLocationId === 'aimogasta' ? 'aimogasta' : null;
+  if (!from || !to || from === to) return null;
+  return {
+    id, groupId: typeof d.groupId === 'string' ? d.groupId : undefined, date: dateOf(d), createdAt: createdIso(d),
+    productId: d.productId || '', productName: d.productName || 'Producto', qty: n(d.quantity), from, to,
   };
 }

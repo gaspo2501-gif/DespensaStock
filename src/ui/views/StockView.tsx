@@ -33,7 +33,7 @@ export const StockView: React.FC<{ api: ShellApi }> = ({ api }) => {
     <>
       <div className="ds-row spread">
         <div><h1>Stock</h1><div className="muted">{products.length} productos activos</div></div>
-        <div className="ds-row"><button className="ds-btn" onClick={() => setModal({ kind: 'scan' })}><Icon name="scan" />Escanear</button><button className="ds-btn pri" onClick={() => setModal({ kind: 'new' })}>Nuevo producto</button></div>
+        <div className="ds-row"><button className="ds-btn" onClick={() => api.go('traspaso')}><Icon name="traspaso" />Traspaso de varios productos</button><button className="ds-btn" onClick={() => setModal({ kind: 'scan' })}><Icon name="scan" />Escanear</button><button className="ds-btn pri" onClick={() => setModal({ kind: 'new' })}>Nuevo producto</button></div>
       </div>
       <div className="ds-panel">
         <div className="ds-row" style={{ marginBottom: 12 }}>
