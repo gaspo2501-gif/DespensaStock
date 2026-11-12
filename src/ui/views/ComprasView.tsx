@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { DEFAULT_MARGIN, Fund, FUND_LABEL, LOCS, MARGINS, PAY_FUNDS, Product } from '../../core/model';
+import { DEFAULT_MARGIN, Fund, FUND_LABEL, LOCS, MARGINS, otherLoc, PAY_FUNDS, Product } from '../../core/model';
 import { fdate, money, parseAmount, priceFromCost, providerAccount, purchaseState } from '../../core/calc';
 import { useData } from '../../data/DataContext';
 import { cancelPurchase, createPurchase } from '../../data/ops';
@@ -8,7 +8,7 @@ import { ProductFormModal } from '../ProductForm';
 import { ScannerModal } from '../SaleDetail';
 import type { ShellApi } from '../Shell';
 
-interface PLine { pid: string; qty: string; cost: string; margin: number; custom: boolean; price: string; edited: boolean }
+interface PLine { pid: string; qty: string; cost: string; margin: number; custom: boolean; price: string; edited: boolean; send: string }
 const STATE: Record<string, [string, string]> = { PAID: ['Pagado', 'p-ok'], PARTIAL: ['Pago parcial', 'p-warn'], PENDING: ['Pendiente', 'p-bad'], CANCELLED: ['Anulado', 'p-neu'] };
 
 export const ComprasView: React.FC<{ api: ShellApi }> = ({ api }) => {
@@ -16,6 +16,8 @@ export const ComprasView: React.FC<{ api: ShellApi }> = ({ api }) => {
   const toast = useToast();
   const { run, busy } = useRun();
   const loc = api.loc;
+  const other = otherLoc(loc);
+  const [split, setSplit] = useState(false);
   const [providerId, setProviderId] = useState('');
   const [q, setQ] = useState('');
   const [lines, setLines] = useState<PLine[]>([]);
@@ -32,7 +34,7 @@ export const ComprasView: React.FC<{ api: ShellApi }> = ({ api }) => {
   }, [q, data.products]);
 
   const addProduct = (p: Product) => {
-    setLines((ls) => ls.some((l) => l.pid === p.id) ? ls : [...ls, { pid: p.id, qty: '1', cost: p.cost ? String(p.cost) : '', margin: DEFAULT_MARGIN, custom: false, price: p.cost ? String(priceFromCost(p.cost, DEFAULT_MARGIN)) : '', edited: false }]);
+    setLines((ls) => ls.some((l) => l.pid === p.id) ? ls : [...ls, { pid: p.id, qty: '1', cost: p.cost ? String(p.cost) : '', margin: DEFAULT_MARGIN, custom: false, price: p.cost ? String(priceFromCost(p.cost, DEFAULT_MARGIN)) : '', edited: false, send: '' }]);
     setQ('');
   };
   const [pendingAdd, setPendingAdd] = useState<string | null>(null);
@@ -59,20 +61,25 @@ export const ComprasView: React.FC<{ api: ShellApi }> = ({ api }) => {
   const favor = providerId ? providerAccount(data, providerId).favor : 0;
   const favorUse = Math.max(0, Math.min(favor, total - paid));
 
+  const sendOf = (l: PLine) => (split ? Math.round(parseAmount(l.send)) || 0 : 0);
+  const badSend = split && lines.some((l) => sendOf(l) < 0 || sendOf(l) > Math.round(parseAmount(l.qty)));
+  const totalSend = lines.reduce((t, l) => t + Math.max(0, sendOf(l)), 0);
+
   const save = () => {
+    if (badSend) return toast('Revisá las cantidades que van a ' + LOCS[other] + ': no pueden superar lo que entró.', 'err');
     if (payMode === 'partial' && !(paid > 0 && paid < total)) return toast('El pago parcial tiene que ser mayor a $0 y menor al total.', 'err');
     run(() => createPurchase({
       providerId, providerName: provider?.name || '', loc, paid, fund: paid > 0 ? (fund || undefined) : undefined, favor,
-      lines: lines.map((l) => { const product = byId.get(l.pid)!; const cost = parseAmount(l.cost); return { product, qty: Math.round(parseAmount(l.qty)), unitCost: cost, margin: l.margin, price: parseAmount(l.price), suggested: priceFromCost(cost, l.margin) }; }),
-    }), (r) => 'Ingreso confirmado: ' + money(r.total) + (r.creditApplied > 0 ? ' · se usaron ' + money(r.creditApplied) + ' de saldo a favor' : '') + (r.paid + r.creditApplied < r.total - 0.5 ? ' · queda debiendo ' + money(r.total - r.paid - r.creditApplied) : ' · pagado') + (r.queued ? ' · guardado en este equipo' : ''))
-      .then((r) => { if (r) { setLines([]); setPayMode('all'); setPartial(''); setFund(''); setProviderId(''); } });
+      lines: lines.map((l) => { const product = byId.get(l.pid)!; const cost = parseAmount(l.cost); return { product, qty: Math.round(parseAmount(l.qty)), unitCost: cost, margin: l.margin, price: parseAmount(l.price), suggested: priceFromCost(cost, l.margin), send: sendOf(l) > 0 ? sendOf(l) : undefined }; }),
+    }), (r) => 'Ingreso confirmado: ' + money(r.total) + (r.creditApplied > 0 ? ' · se usaron ' + money(r.creditApplied) + ' de saldo a favor' : '') + (r.paid + r.creditApplied < r.total - 0.5 ? ' · queda debiendo ' + money(r.total - r.paid - r.creditApplied) : ' · pagado') + (totalSend > 0 ? ' · ' + totalSend + (totalSend === 1 ? ' unidad pasó a ' : ' unidades pasaron a ') + LOCS[other] : '') + (r.queued ? ' · guardado en este equipo' : ''))
+      .then((r) => { if (r) { setLines([]); setSplit(false); setPayMode('all'); setPartial(''); setFund(''); setProviderId(''); } });
   };
 
   const hist = [...data.purchases].sort((a, b) => (b.createdAt || b.date).localeCompare(a.createdAt || a.date)).slice(0, 60);
 
   return (
     <>
-      <div className="ds-row spread"><div><h1>Ingreso de mercadería</h1><div className="muted">Entra al stock de <LocName loc={loc} /></div></div></div>
+      <div className="ds-row spread"><div><h1>Ingreso de mercadería</h1><div className="muted">Entra al stock de <LocName loc={loc} />{split ? <> y se reparte con <LocName loc={other} /></> : null}</div></div></div>
       <div className="ds-panel">
         <div className="ds-grid g2" style={{ marginBottom: 12 }}>
           <label className="ds-field"><span>Proveedor</span>
@@ -95,6 +102,10 @@ export const ComprasView: React.FC<{ api: ShellApi }> = ({ api }) => {
           </div>
         </div>
 
+        <label className="ds-split">
+          <input id="pur-split" type="checkbox" checked={split} onChange={(e) => setSplit(e.target.checked)} />
+          <span><b>Repartir con {LOCS[other]}</b><span className="small muted"> · en cada producto ponés cuántas unidades van a {LOCS[other]} y se pasan al confirmar el ingreso</span></span>
+        </label>
         {!lines.length ? <div className="ds-empty">Agregá los productos que entraron. Cargás el costo y la app calcula el precio con el margen que elijas.</div> : (
           <>
             <div className="ds-pline hide-m" style={{ padding: '0 0 6px' }}><span className="ds-label">Producto</span><span className="ds-label">Cant.</span><span className="ds-label">Costo unit.</span><span className="ds-label">Margen de ganancia</span><span className="ds-label">Precio de venta</span><span /></div>
@@ -104,7 +115,19 @@ export const ComprasView: React.FC<{ api: ShellApi }> = ({ api }) => {
               const pct = prev && c > 0 && c !== prev ? Math.round(((c - prev) / prev) * 100) : 0;
               return (
                 <div className="ds-pline" key={l.pid}>
-                  <div className="pn" style={{ minWidth: 0 }}><div className="trunc" style={{ fontWeight: 600 }}>{p.name}</div><div className="small muted">Precio actual {p.price ? money(p.price) : 'sin precio'} · stock {p.stock[loc]}</div></div>
+                  <div className="pn" style={{ minWidth: 0 }}><div className="trunc" style={{ fontWeight: 600 }}>{p.name}</div><div className="small muted">Precio actual {p.price ? money(p.price) : 'sin precio'} · stock {LOCS[loc]} {p.stock[loc]} · {LOCS[other]} {p.stock[other]}</div>
+                    {split && (() => {
+                      const q = Math.round(parseAmount(l.qty)) || 0; const sd = sendOf(l); const over = sd > q;
+                      return (
+                        <div className="ds-sendrow">
+                          <span className="small">A {LOCS[other]}</span>
+                          <AmountInput id={'ps-' + i} value={l.send} onChange={(v) => upd(i, { send: v })} placeholder="0" ariaLabel={'Unidades que van a ' + LOCS[other]} className={over ? 'bad' : ''} />
+                          {q > 1 && <button className="ds-btn ghost sm" onClick={() => upd(i, { send: String(Math.floor(q / 2)) })}>Mitad</button>}
+                          <span className="small" style={over ? { color: 'var(--danger)', fontWeight: 600 } : { color: 'var(--muted)' }}>{over ? 'Entraron solo ' + q : 'Quedan ' + (q - sd) + ' en ' + LOCS[loc]}</span>
+                        </div>
+                      );
+                    })()}
+                  </div>
                   <AmountInput id={'pq-' + i} value={l.qty} onChange={(v) => upd(i, { qty: v })} ariaLabel="Cantidad" />
                   <div>
                     <AmountInput id={'pc-' + i} value={l.cost} onChange={(v) => upd(i, { cost: v })} placeholder="Costo" ariaLabel="Costo unitario" />
@@ -141,7 +164,8 @@ export const ComprasView: React.FC<{ api: ShellApi }> = ({ api }) => {
             </div>
           </div>
           <div className="ds-panel soft">
-            <div className="ds-cmp"><span>Total del ingreso</span><b className="num" style={{ fontSize: '1.3rem' }}>{money(total)}</b></div>
+            <div className="ds-cmp"><span>Total del ingreso</span><b className="num" style={{ fontSize: '1.3rem' }}>{money(total)}</b>
+              {split && <><span>Unidades que van a {LOCS[other]}</span><b className="num">{totalSend}</b></>}</div>
             <button className="ds-btn pri ds-confirm" style={{ marginTop: 12 }} disabled={busy || !lines.length} onClick={save}>{busy ? 'Guardando…' : 'Confirmar ingreso'}</button>
           </div>
         </div>
@@ -178,13 +202,16 @@ const PurchaseDetail: React.FC<{ id: string; onClose: () => void }> = ({ id, onC
   const pays = data.spays.filter((x) => x.purchaseId === id);
   const activePays = pays.filter((x) => x.status !== 'CANCELLED');
   const st = STATE[purchaseState(p)];
+  const anySent = items.some((i) => i.sent);
+  const to = otherLoc(p.loc);
   return (
     <Modal title={'Ingreso del ' + fdate(p.date) + ' · ' + p.providerName} onClose={onClose} wide>
       <div className="ds-row" style={{ gap: 6 }}><span className={'ds-pill p-' + p.loc}>{LOCS[p.loc]}</span><span className={'ds-pill ' + st[1]}>{st[0]}</span></div>
       <div className="ds-tbl"><table>
-        <thead><tr><th>Producto</th><th className="r">Cant.</th><th className="r">Costo</th><th className="r">Antes</th><th className="r">Margen</th><th className="r">Precio</th></tr></thead>
-        <tbody>{items.map((i) => <tr key={i.id}><td>{i.name}</td><td className="r num">{i.qty}</td><td className="r num">{money(i.unitCost)}</td><td className={'r num ' + (i.previousCost && i.unitCost > i.previousCost ? 'down' : 'muted')}>{i.previousCost ? money(i.previousCost) : '—'}</td><td className="r num">{i.margin ? i.margin + '%' : '—'}</td><td className="r num">{money(i.finalSalePrice)}</td></tr>)}</tbody>
+        <thead><tr><th>Producto</th><th className="r">Cant.</th><th className="r">Costo</th><th className="r">Antes</th><th className="r">Margen</th><th className="r">Precio</th>{anySent && <th className="r">A {LOCS[to]}</th>}</tr></thead>
+        <tbody>{items.map((i) => <tr key={i.id}><td>{i.name}</td><td className="r num">{i.qty}</td><td className="r num">{money(i.unitCost)}</td><td className={'r num ' + (i.previousCost && i.unitCost > i.previousCost ? 'down' : 'muted')}>{i.previousCost ? money(i.previousCost) : '—'}</td><td className="r num">{i.margin ? i.margin + '%' : '—'}</td><td className="r num">{money(i.finalSalePrice)}</td>{anySent && <td className="r num">{i.sent || '—'}</td>}</tr>)}</tbody>
       </table></div>
+      {anySent && <div className="small muted">Al confirmar se mandaron {items.reduce((t, i) => t + (i.sent || 0), 0)} unidades a {LOCS[to]}. Si anulás el ingreso, se descuentan de las dos sucursales.</div>}
       <div className="ds-cmp"><span>Total</span><b className="num">{money(p.total)}</b><span>Pagado</span><b className="num">{money(p.paidAmount)}</b></div>
       {pays.length > 0 && <div className="small muted">Pagos: {pays.map((x) => money(x.amount) + ' desde ' + FUND_LABEL[x.fund] + (x.status === 'CANCELLED' ? ' (anulado, la plata volvió)' : '')).join(' · ')}</div>}
       {p.status !== 'CANCELLED' && (

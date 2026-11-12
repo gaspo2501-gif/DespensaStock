@@ -178,7 +178,8 @@ export function normPurchaseItem(id: string, d: Raw): PurchaseItem {
   return {
     id, purchaseId: d.purchaseId || '', productId: d.productId || '', name: d.name || 'Producto', qty: n(d.quantity),
     unitCost: n(d.unitCost), previousCost: typeof d.previousCost === 'number' ? d.previousCost : undefined,
-    finalSalePrice: n(d.finalSalePrice), margin: typeof d.margin === 'number' ? d.margin : undefined, status: statusOf(d),
+    finalSalePrice: n(d.finalSalePrice), margin: typeof d.margin === 'number' ? d.margin : undefined,
+    sent: typeof d.sentToOther === 'number' && d.sentToOther > 0 ? d.sentToOther : undefined, status: statusOf(d),
   };
 }
 
@@ -210,9 +211,10 @@ export function normClosure(id: string, d: Raw): Closure {
 export function normTransfer(id: string, d: Raw): StockTransfer | null {
   const from = d.sourceLocationId === 'olascoaga' ? 'olascoaga' : d.sourceLocationId === 'aimogasta' ? 'aimogasta' : null;
   const to = d.destinationLocationId === 'olascoaga' ? 'olascoaga' : d.destinationLocationId === 'aimogasta' ? 'aimogasta' : null;
-  if (!from || !to || from === to) return null;
+  if (!from || !to || from === to || d.status === 'CANCELLED') return null;
   return {
     id, groupId: typeof d.groupId === 'string' ? d.groupId : undefined, date: dateOf(d), createdAt: createdIso(d),
     productId: d.productId || '', productName: d.productName || 'Producto', qty: n(d.quantity), from, to,
+    purchaseId: typeof d.purchaseId === 'string' ? d.purchaseId : undefined,
   };
 }

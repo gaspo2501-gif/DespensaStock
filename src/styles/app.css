@@ -196,3 +196,9 @@ details summary{cursor:pointer;font-weight:600}
 .ds-tline .ds-row input{width:80px!important;min-width:0;flex:none;text-align:center}
 input.bad{border-color:var(--danger)!important;background:var(--danger-soft)}
 @media (max-width:640px){.ds-tline{flex-wrap:wrap}.ds-tline .grow{flex-basis:100%}}
+
+/* Reparto del ingreso entre sucursales */
+.ds-split{display:flex;align-items:flex-start;gap:8px;padding:10px 12px;margin-bottom:12px;border:1px dashed var(--line);border-radius:10px;cursor:pointer}
+.ds-split input{width:18px;height:18px;margin-top:2px;flex:none}
+.ds-sendrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px}
+.ds-sendrow input{width:64px!important;min-width:0;flex:none;text-align:center;padding:4px 6px}
