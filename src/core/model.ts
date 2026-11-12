@@ -156,6 +156,8 @@ export interface PurchaseItem {
   previousCost?: number;
   finalSalePrice: number;
   margin?: number;
+  /** Unidades de este ingreso que se mandaron a la otra sucursal al confirmarlo. */
+  sent?: number;
   status: Status;
 }
 
@@ -208,6 +210,8 @@ export interface StockTransfer {
   qty: number;
   from: Loc;
   to: Loc;
+  /** Si el traspaso se hizo al repartir un ingreso de mercadería. */
+  purchaseId?: string;
 }
 
 export interface DataState {

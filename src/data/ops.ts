@@ -49,6 +49,18 @@ function deltaStockUpdate(p: Product, loc: Loc, delta: number): Record<string, a
   return fullStockUpdate(map);
 }
 
+/** Igual que deltaStockUpdate pero cambiando las dos sucursales a la vez. */
+function deltaStockUpdate2(p: Product, delta: { aimogasta: number; olascoaga: number }): Record<string, any> {
+  const tot = delta.aimogasta + delta.olascoaga;
+  if (p.hasMap) {
+    const r: Record<string, any> = { stockQuantity: increment(tot), stock: increment(tot) };
+    if (delta.aimogasta) r['stockByLocation.aimogasta'] = increment(delta.aimogasta);
+    if (delta.olascoaga) r['stockByLocation.olascoaga'] = increment(delta.olascoaga);
+    return r;
+  }
+  return fullStockUpdate({ aimogasta: p.stock.aimogasta + delta.aimogasta, olascoaga: p.stock.olascoaga + delta.olascoaga });
+}
+
 export class UserError extends Error {}
 
 /* ============================ VENTAS ============================ */
@@ -389,7 +401,8 @@ export async function transferStockBatch(args: { from: Loc; lines: { product: Pr
 }
 
 /* ============================ COMPRAS ============================ */
-export interface PurchaseLine { product: Product; qty: number; unitCost: number; margin: number; price: number; suggested: number }
+/** send: unidades que se mandan directo a la otra sucursal (reparto del ingreso). */
+export interface PurchaseLine { product: Product; qty: number; unitCost: number; margin: number; price: number; suggested: number; send?: number }
 
 export async function createPurchase(args: { providerId: string; providerName: string; loc: Loc; lines: PurchaseLine[]; paid: number; fund?: Fund; favor?: number }) {
   const { providerId, providerName, loc, lines, paid, fund } = args;
@@ -397,6 +410,10 @@ export async function createPurchase(args: { providerId: string; providerName: s
   if (!lines.length) throw new UserError('Agregá al menos un producto.');
   const bad = lines.find((l) => !(l.qty > 0) || !(l.unitCost > 0) || !(l.price > 0));
   if (bad) throw new UserError(`Revisá cantidad, costo y precio de “${bad.product.name}”.`);
+  const badSend = lines.find((l) => l.send !== undefined && (!(l.send >= 0) || Math.round(l.send) !== l.send || l.send > l.qty));
+  if (badSend) throw new UserError(`“${badSend.product.name}”: no podés mandar más de las ${badSend.qty} que entraron.`);
+  const other: Loc = loc === 'aimogasta' ? 'olascoaga' : 'aimogasta';
+  const groupId = `tgroup_${Date.now()}_${rnd()}`;
   const total = lines.reduce((t, l) => t + l.qty * l.unitCost, 0);
   if (paid < 0 || paid > total + 0.5) throw new UserError('El pago no puede superar el total del ingreso.');
   if (paid > 0 && !fund) throw new UserError('Elegí de dónde salió la plata del pago.');
@@ -426,9 +443,21 @@ export async function createPurchase(args: { providerId: string; providerName: s
     };
     if (typeof l.product.cost === 'number') item.previousCost = l.product.cost;
     if (typeof l.product.price === 'number') item.previousSalePrice = l.product.price;
+    const send = l.send || 0;
+    if (send > 0) { item.sentToOther = send; item.sentToLocationId = other; }
     b.set(doc(db, 'purchase_items', iid), item);
+    if (send > 0) {
+      // Reparto: queda registrado también como traspaso, para verlo en el historial de traspasos.
+      const tid = `trans_${Date.now()}_${rnd()}`;
+      b.set(doc(db, 'stock_transfers', tid), {
+        id: tid, groupId, purchaseId, date, productId: l.product.id, barcode: l.product.barcode, productName: l.product.name, quantity: send,
+        sourceLocationId: loc, sourceLocationName: LOCS[loc], destinationLocationId: other, destinationLocationName: LOCS[other],
+        notes: 'Reparto del ingreso de ' + providerName, createdAtIso: iso, createdAt: ts(),
+      });
+    }
+    const delta = { aimogasta: 0, olascoaga: 0 }; delta[loc] = l.qty - send; delta[other] = send;
     b.update(doc(db, 'products', l.product.id), {
-      ...deltaStockUpdate(l.product, loc, l.qty), currentCost: l.unitCost, lastCost: l.unitCost, costPrice: l.unitCost,
+      ...deltaStockUpdate2(l.product, delta), currentCost: l.unitCost, lastCost: l.unitCost, costPrice: l.unitCost,
       salePrice: l.price, lastPurchaseDate: ts(), lastSupplierId: providerId, lastSupplierName: providerName, updatedAt: ts(),
     });
   }
@@ -446,10 +475,11 @@ export async function createPurchase(args: { providerId: string; providerName: s
 export async function cancelPurchase(purchaseId: string, reason: string) {
   if (!isOnline()) throw new UserError('Para anular un ingreso hace falta conexión.');
   if (!reason.trim()) throw new UserError('Escribí el motivo de la anulación.');
-  const [itemsSnap, paysSnap, cashSnap] = await Promise.all([
+  const [itemsSnap, paysSnap, cashSnap, transSnap] = await Promise.all([
     getDocs(query(collection(db, 'purchase_items'), where('purchaseId', '==', purchaseId))),
     getDocs(query(collection(db, 'supplier_payments'), where('purchaseId', '==', purchaseId))),
     getDocs(query(collection(db, 'cash_movements'), where('purchaseId', '==', purchaseId))),
+    getDocs(query(collection(db, 'stock_transfers'), where('purchaseId', '==', purchaseId))),
   ]);
   const iso = nowIso();
   const cancel = { status: 'CANCELLED', cancelledAt: ts(), cancelledAtIso: iso, cancellationReason: reason.trim() };
@@ -461,9 +491,14 @@ export async function cancelPurchase(purchaseId: string, reason: string) {
     if (pSnap.data().status === 'CANCELLED') throw new UserError('Este ingreso ya estaba anulado.');
     const loc: Loc = pSnap.data().locationId === 'olascoaga' ? 'olascoaga' : 'aimogasta';
     const items = itemsSnap.docs.map((d: any) => d.data());
-    // agrupar por producto
-    const byProd = new Map<string, { qty: number; name: string }>();
-    for (const it of items) { const x = byProd.get(it.productId) || { qty: 0, name: it.name }; x.qty += Number(it.quantity) || 0; byProd.set(it.productId, x); }
+    const other: Loc = loc === 'aimogasta' ? 'olascoaga' : 'aimogasta';
+    // agrupar por producto (qty: lo que quedó en la sucursal del ingreso; sent: lo que se repartió a la otra)
+    const byProd = new Map<string, { qty: number; sent: number; name: string }>();
+    for (const it of items) {
+      const x = byProd.get(it.productId) || { qty: 0, sent: 0, name: it.name };
+      const s = Number(it.sentToOther) || 0;
+      x.qty += (Number(it.quantity) || 0) - s; x.sent += s; byProd.set(it.productId, x);
+    }
     const prodSnaps: any[] = [];
     for (const pid of byProd.keys()) prodSnaps.push(await tx.get(doc(db, 'products', pid)));
     const paySnaps: any[] = [];
@@ -476,12 +511,16 @@ export async function cancelPurchase(purchaseId: string, reason: string) {
       if (!s.exists()) return;
       const st = rawStock(s.data()); const x = byProd.get(keys[i])!;
       if (st[loc] < x.qty) throw new UserError(`No se puede anular: de “${x.name}” quedan ${st[loc]} en ${LOCS[loc]} y entraron ${x.qty}.`);
+      if (st[other] < x.sent) throw new UserError(`No se puede anular: de “${x.name}” quedan ${st[other]} en ${LOCS[other]} y se mandaron ${x.sent}.`);
     });
+    const transSnaps: any[] = [];
+    for (const d of transSnap.docs) transSnaps.push(await tx.get(d.ref));
     prodSnaps.forEach((s, i) => {
       if (!s.exists()) return;
       const st = rawStock(s.data()); const x = byProd.get(keys[i])!;
-      tx.update(s.ref, { ...fullStockUpdate({ ...st, [loc]: st[loc] - x.qty }), updatedAt: ts() });
+      tx.update(s.ref, { ...fullStockUpdate({ ...st, [loc]: st[loc] - x.qty, [other]: st[other] - x.sent }), updatedAt: ts() });
     });
+    for (const s of transSnaps) if (s.exists() && s.data().status !== 'CANCELLED') tx.update(s.ref, cancel);
     for (const s of paySnaps) if (s.exists() && s.data().status !== 'CANCELLED') { returned += Number(s.data().amount) || 0; tx.update(s.ref, cancel); }
     for (const s of cashSnaps) if (s.exists() && s.data().status !== 'CANCELLED') tx.update(s.ref, cancel);
     for (const d of itemsSnap.docs) tx.update(d.ref, cancel);

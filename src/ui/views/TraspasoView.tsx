@@ -159,7 +159,7 @@ export const TraspasoView: React.FC<{ api: ShellApi }> = ({ api }) => {
             <tbody>{groups.map((g) => (
               <tr key={g.id} className="click" onClick={() => setModal({ kind: 'detail', id: g.id })}>
                 <td className="num">{fdate(g.date)}</td>
-                <td>{LOCS[g.from]} → {LOCS[g.to]}<div className="small muted trunc" style={{ maxWidth: 360 }}>{g.items.map((t) => t.qty + '× ' + t.productName).join(', ')}</div></td>
+                <td>{LOCS[g.from]} → {LOCS[g.to]}{g.items[0]?.purchaseId ? <span className="ds-pill p-neu" style={{ marginLeft: 6 }}>Reparto de ingreso</span> : null}<div className="small muted trunc" style={{ maxWidth: 360 }}>{g.items.map((t) => t.qty + '× ' + t.productName).join(', ')}</div></td>
                 <td className="r num">{g.items.length}</td>
                 <td className="r num">{g.items.reduce((t, x) => t + x.qty, 0)}</td>
               </tr>
