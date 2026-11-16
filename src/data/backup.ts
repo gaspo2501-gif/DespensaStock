@@ -2,7 +2,7 @@
  * Copia de seguridad: descarga TODOS los documentos de la base en un archivo .json.
  * Solo lee; no modifica nada.
  */
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, getDocsFromCache } from 'firebase/firestore';
 import { db } from '../services/firebase/config';
 
 const COLLECTIONS = [
@@ -14,7 +14,10 @@ export async function downloadBackup(): Promise<number> {
   const out: Record<string, Record<string, unknown>> = {};
   let count = 0;
   for (const c of COLLECTIONS) {
-    const snap = await getDocs(collection(db, c));
+    // Primero lo guardado en este equipo (no gasta lecturas); si no hay nada, se pide al servidor.
+    let snap: any = null;
+    try { snap = await getDocsFromCache(collection(db, c)); } catch { snap = null; }
+    if (!snap || snap.empty) snap = await getDocs(collection(db, c));
     out[c] = {};
     snap.forEach((d: any) => {
       out[c][d.id] = JSON.parse(JSON.stringify(d.data(), (_k, v) => (v && typeof v.toDate === 'function' ? { __timestamp: v.toDate().toISOString() } : v)));

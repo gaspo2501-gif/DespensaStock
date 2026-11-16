@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
-import { initializeFirestore, getFirestore, Firestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore';
+import { initializeFirestore, getFirestore, Firestore, persistentLocalCache, persistentMultipleTabManager, CACHE_SIZE_UNLIMITED } from 'firebase/firestore';
 
 interface FirebaseConfig {
   apiKey: string;
@@ -41,7 +41,8 @@ try {
   // Lo cargado sin conexión queda guardado en el navegador y se sube solo al volver la conexión.
   db = initializeFirestore(app, {
     experimentalAutoDetectLongPolling: true,
-    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+    // Sin límite de tamaño: el historial descargado queda guardado en el equipo y no se vuelve a leer del servidor.
+    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager(), cacheSizeBytes: CACHE_SIZE_UNLIMITED }),
   }, dbId || '(default)');
 } catch (e) {
   console.warn('initializeFirestore fallback to getFirestore:', e);

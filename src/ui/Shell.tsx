@@ -3,6 +3,7 @@ import { Loc, LOCS, LOC_IDS } from '../core/model';
 import { useData } from '../data/DataContext';
 import { Icon, Modal, ToastProvider, useRun } from './common';
 import { downloadBackup } from '../data/backup';
+import { requestFullResync } from '../data/DataContext';
 import { usePWA } from '../hooks/usePWA';
 import { InicioView } from './views/InicioView';
 import { VentaView } from './views/VentaView';
@@ -38,6 +39,11 @@ const ShellInner: React.FC = () => {
   const pwa = usePWA();
   const { run: runBackup, busy: backingUp } = useRun();
   const backup = () => runBackup(() => downloadBackup(), (n) => 'Copia de seguridad descargada (' + n + ' registros).');
+  // Vuelve a bajar toda la base en este equipo. Gasta muchas lecturas del cupo diario: solo si algo no se ve bien.
+  const resync = () => {
+    if (!window.confirm('¿Volver a descargar todos los datos del servidor en este equipo?\n\nUsalo solo si ves algo desactualizado: gasta muchas lecturas del cupo diario gratuito.')) return;
+    requestFullResync(); window.location.reload();
+  };
   const [view, setView] = useState<View>('inicio');
   const [loc, setLocState] = useState<Loc>(loadLoc);
   const [more, setMore] = useState(false);
@@ -71,6 +77,7 @@ const ShellInner: React.FC = () => {
           <div className="ds-col" style={{ marginTop: 'auto', gap: 8 }}>
             {pwa.isInstallable && <button className="ds-btn sm" onClick={pwa.promptInstall}>Instalar aplicación</button>}
             <button className="ds-btn sm ghost" disabled={backingUp} onClick={backup}>{backingUp ? 'Descargando…' : 'Descargar copia de seguridad'}</button>
+            <button className="ds-btn sm ghost" onClick={resync}>Volver a descargar todo</button>
           </div>
         </aside>
         <div className="ds-main">
@@ -121,6 +128,7 @@ const ShellInner: React.FC = () => {
               <button key={k} className="ds-btn" style={{ justifyContent: 'flex-start' }} onClick={() => go(k)}><Icon name={k} size={20} />{NAV.find((n) => n[0] === k)![1]}</button>
             ))}
             <button className="ds-btn ghost" disabled={backingUp} onClick={backup}>Descargar copia de seguridad</button>
+            <button className="ds-btn ghost" onClick={resync}>Volver a descargar todo</button>
           </div>
         </Modal>
       )}

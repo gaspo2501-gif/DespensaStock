@@ -67,6 +67,7 @@ export function useRun() {
       if (!(e instanceof UserError)) console.error(e);
       const msg = e instanceof UserError ? e.message
         : e?.code === 'permission-denied' ? 'La base de datos rechazó la operación (permisos). No se guardó.'
+        : (e?.code === 'resource-exhausted' || /quota/i.test(String(e?.message || ''))) ? 'No se guardó: se alcanzó el límite diario de la base de datos (plan gratuito de Firebase). Las ventas sí se pueden guardar; esta operación probala después de las 5 de la mañana.'
         : 'No se pudo guardar: ' + (e?.message || 'error desconocido') + '. Probá de nuevo.';
       toast(msg, 'err');
       return undefined;
