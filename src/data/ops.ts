@@ -9,15 +9,15 @@
  * - Si Firestore rechaza una escritura con conexión, el error llega a la pantalla (no se muestra "guardado").
  */
 import {
-  collection, deleteField, doc, getDocs, increment, query, runTransaction, serverTimestamp, updateDoc, where, writeBatch, setDoc,
+  collection, deleteField, doc, getDocs, increment, query, serverTimestamp, where,
 } from 'firebase/firestore';
+// Escrituras con marca de cambio (_u): ver fsx.ts.
+import { isQuotaError, runTransaction, setDoc, updateDoc, writeBatch } from './fsx';
 import { db } from '../services/firebase/config';
 import { getArgentinaToday } from '../utils/dateUtils';
 import { Customer, Fund, Loc, LOCS, Pay, Product, Purchase } from '../core/model';
 import { money as fmt, payTotal, saleMethodFor } from '../core/calc';
 import { isOnline, runWrite } from './sync';
-import { salesService } from '../services/firebase/salesService';
-import { expenseService } from '../services/firebase/expenseService';
 
 const rnd = () => Math.random().toString(36).slice(2, 7);
 const nowIso = () => new Date().toISOString();
@@ -120,8 +120,9 @@ export async function createSale(args: { lines: SaleLine[]; pay: Pay; customer?:
     } catch (e: any) {
       if (e instanceof UserError) throw e;
       const code = e?.code || '';
-      if (code !== 'unavailable' && code !== 'deadline-exceeded') throw e;
-      // Sin respuesta del servidor: se guarda en el equipo como venta sin conexión.
+      if (code !== 'unavailable' && code !== 'deadline-exceeded' && !isQuotaError(e)) throw e;
+      // Sin respuesta del servidor, o cupo diario de lecturas agotado: se guarda sin leer antes
+      // (descuenta el stock con sumas atómicas), igual que una venta sin conexión.
     }
   }
   const b = writeBatch(db);
@@ -139,7 +140,38 @@ export async function createSale(args: { lines: SaleLine[]; pay: Pay; customer?:
 export async function cancelSale(saleId: string, reason: string) {
   if (!isOnline()) throw new UserError('Para anular una venta hace falta conexión.');
   if (!reason.trim()) throw new UserError('Escribí el motivo de la anulación.');
-  await salesService.cancelSale(saleId, reason); // misma lógica atómica de la app anterior
+  const why = reason.trim(); const iso = nowIso();
+  // Misma lógica que la app anterior: devuelve el stock, anula la deuda del fiado y los movimientos de caja de la venta.
+  const [debtSnap, cashSnap] = await Promise.all([
+    getDocs(query(collection(db, 'account_movements'), where('saleId', '==', saleId))),
+    getDocs(query(collection(db, 'cash_movements'), where('sourceId', '==', saleId))),
+  ]);
+  const cancel = { status: 'CANCELLED', cancelledAt: ts(), cancelledAtIso: iso, cancellationReason: why };
+  await runTransaction(db, async (tx: any) => {
+    const saleRef = doc(db, 'sales', saleId);
+    const sSnap = await tx.get(saleRef);
+    if (!sSnap.exists()) throw new UserError('No se encontró la venta.');
+    const sd = sSnap.data();
+    if (sd.status === 'CANCELLED') throw new UserError('Esta venta ya estaba anulada.');
+    const loc: Loc = sd.locationId === 'olascoaga' ? 'olascoaga' : 'aimogasta';
+    const qtyBy = new Map<string, number>();
+    for (const it of (sd.items || [])) if (it.productId) qtyBy.set(it.productId, (qtyBy.get(it.productId) || 0) + (Number(it.quantity) || 0));
+    const prodSnaps: any[] = [];
+    for (const pid of qtyBy.keys()) prodSnaps.push(await tx.get(doc(db, 'products', pid)));
+    const debtSnaps: any[] = [];
+    for (const d of debtSnap.docs) if (d.data().type === 'DEBT') debtSnaps.push(await tx.get(d.ref));
+    const cashSnaps: any[] = [];
+    for (const d of cashSnap.docs) cashSnaps.push(await tx.get(d.ref));
+    if (sd.paymentMethod === 'credit' && !debtSnaps.length) throw new UserError('No se encontró la deuda de esta venta fiada.');
+    for (const ps of prodSnaps) {
+      if (!ps.exists()) continue;
+      const st = rawStock(ps.data());
+      tx.update(ps.ref, { ...fullStockUpdate({ ...st, [loc]: st[loc] + (qtyBy.get(ps.id) || 0) }), updatedAt: ts() });
+    }
+    for (const d of debtSnaps) if (d.exists() && d.data().status !== 'CANCELLED') tx.update(d.ref, cancel);
+    for (const c of cashSnaps) if (c.exists() && c.data().status !== 'CANCELLED') tx.update(c.ref, cancel);
+    tx.update(saleRef, cancel);
+  });
   return true;
 }
 
@@ -584,7 +616,19 @@ export async function createExpense(args: { category: string; description: strin
 }
 export async function cancelExpense(id: string, reason: string) {
   if (!isOnline()) throw new UserError('Para anular un gasto hace falta conexión.');
-  await expenseService.cancelExpense(id, reason || 'Anulado desde Caja');
+  const why = (reason || 'Anulado desde Caja').trim(); const iso = nowIso();
+  const cashSnap = await getDocs(query(collection(db, 'cash_movements'), where('sourceId', '==', id)));
+  const cancel = { status: 'CANCELLED', cancelledAt: ts(), cancelledAtIso: iso, cancellationReason: why };
+  await runTransaction(db, async (tx: any) => {
+    const ref = doc(db, 'expenses', id);
+    const s = await tx.get(ref);
+    if (!s.exists()) throw new UserError('No se encontró el gasto.');
+    if (s.data().status === 'CANCELLED') throw new UserError('Este gasto ya estaba anulado.');
+    const cs: any[] = [];
+    for (const d of cashSnap.docs) cs.push(await tx.get(d.ref));
+    for (const c of cs) if (c.exists() && c.data().status !== 'CANCELLED') tx.update(c.ref, cancel);
+    tx.update(ref, { ...cancel, updatedAt: ts() });
+  });
   return true;
 }
 /** Indicar de dónde salió la plata de un gasto viejo que no lo tenía guardado. */

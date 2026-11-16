@@ -102,7 +102,7 @@ export const ComprasView: React.FC<{ api: ShellApi }> = ({ api }) => {
           </div>
         </div>
 
-        <label className="ds-split">
+        <label className="ds-splitopt">
           <input id="pur-split" type="checkbox" checked={split} onChange={(e) => setSplit(e.target.checked)} />
           <span><b>Repartir con {LOCS[other]}</b><span className="small muted"> · en cada producto ponés cuántas unidades van a {LOCS[other]} y se pasan al confirmar el ingreso</span></span>
         </label>
